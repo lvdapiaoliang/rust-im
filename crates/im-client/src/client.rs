@@ -583,11 +583,13 @@ async fn message_loop(
                     }
                     im_protocol::Cmd::SyncResp => {
                         if let Ok(resp) = SyncResp::decode_frame(&event.frame) {
+                            eprintln!("[probe] SyncResp arrived, {} msgs", resp.messages.len());
                             // 逐条去重 + 入库，只上抛「新」消息子集；
                             // 全为重复（或空批）时不上抛——连接层的
                             // 例行同步噪音不出协议层
                             match local.ingest_batch(resp.messages) {
                                 Ok(fresh) if !fresh.is_empty() => {
+                                    eprintln!("[probe] fresh {} msgs", fresh.len());
                                     if events
                                         .send(ClientEvent::SyncBatch(fresh))
                                         .await
@@ -596,8 +598,11 @@ async fn message_loop(
                                         break Outcome::Stopped;
                                     }
                                 }
-                                Ok(_) => {}
-                                Err(_) => break Outcome::Stopped, // 磁盘故障
+                                Ok(_) => eprintln!("[probe] sync all-dup/empty"),
+                                Err(e) => {
+                                    eprintln!("[probe] ingest err {e}");
+                                    break Outcome::Stopped; // 磁盘故障
+                                }
                             }
                         }
                     }

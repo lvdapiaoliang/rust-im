@@ -173,6 +173,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     assert_eq!(batch[1].msg_id, id2, "补投按 msg_id 升序");
     assert_eq!(batch[0].content, Bytes::from_static(b"offline 1"));
     assert_eq!(batch[1].content, Bytes::from_static(b"offline 2"));
+    eprintln!("[probe] act3 batch asserted, bob replying");
 
     // 恢复双向：Bob 回复，Alice 立刻收到
     bob.handle
