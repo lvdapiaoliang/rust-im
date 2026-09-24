@@ -9,9 +9,9 @@
 
 use std::time::Duration;
 
+use sqlx::PgPool;
 use sqlx::migrate::MigrateError;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
 
 /// 开发默认连接串（本机 PostgreSQL；生产/CI 用 `DATABASE_URL` 覆盖）。
 pub const DEFAULT_DATABASE_URL: &str = "postgres://im:im123456@127.0.0.1:5432/im?sslmode=disable";
@@ -76,22 +76,36 @@ pub async fn migrate(pool: &PgPool) -> Result<(), DbError> {
     Ok(())
 }
 
+/// 测试脚手架：web 模块共用的「迁移到位的池」。
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod testing {
+    use std::time::Duration;
 
-    /// 测试前置：拿到「迁移到位」的池；PG 不可达时返回 `None`
-    /// （跳过策略：无库环境保持 workspace 测试全绿，代价是测试空转）。
-    async fn pool_or_skip() -> Option<PgPool> {
+    use sqlx::PgPool;
+    use sqlx::postgres::PgPoolOptions;
+
+    use super::database_url;
+
+    /// 拿到迁移到位的池；PG 不可达时返回 `None`。
+    ///
+    /// 跳过策略：无库环境让测试空转，保持 workspace 全绿
+    /// （代价是「测试通过 ≠ 数据库逻辑验证过」，需 CI 里配真库补盲区）。
+    pub(crate) async fn pool_or_skip() -> Option<PgPool> {
         let pool = PgPoolOptions::new()
             .max_connections(2)
             .acquire_timeout(Duration::from_secs(2))
             .connect(&database_url())
             .await
             .ok()?;
-        migrate(&pool).await.ok()?;
+        super::migrate(&pool).await.ok()?;
         Some(pool)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::pool_or_skip;
+    use super::*;
 
     /// 连接 + 迁移全链路：能连上就应该建齐 7 张表
     #[tokio::test]
@@ -100,15 +114,9 @@ mod tests {
             eprintln!("skip: PostgreSQL 不可达");
             return;
         };
-        for table in [
-            "users",
-            "tokens",
-            "friend_requests",
-            "friends",
-            "groups",
-            "group_members",
-            "files",
-        ] {
+        for table in
+            ["users", "tokens", "friend_requests", "friends", "groups", "group_members", "files"]
+        {
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)",
             )

@@ -1,4 +1,4 @@
-//! Web 接入模块（阶段 5）：REST API + WS 网关 + PostgreSQL 持久化。
+//! Web 接入模块（阶段 5）：REST API + WS 网关 + `PostgreSQL` 持久化。
 //!
 //! ```text
 //!   Vue 前端（web/）

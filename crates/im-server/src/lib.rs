@@ -13,6 +13,7 @@ pub mod router;
 pub mod session;
 pub mod sink;
 pub mod snowflake;
+pub mod web;
 
 pub use router::{Router, RouterError};
 pub use session::{
