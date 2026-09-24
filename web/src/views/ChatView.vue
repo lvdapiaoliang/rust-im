@@ -48,7 +48,11 @@ function logout(): void {
       <button class="logout" title="登出" @click="logout">退出</button>
     </aside>
 
-    <ConversationList :conversations="chat.conversations" :active-id="chat.activeId" />
+    <ConversationList
+      :conversations="chat.conversations"
+      :active-id="chat.activeId"
+      @select="chat.activeId = $event"
+    />
 
     <main class="chat-main">
       <p v-if="loadError" class="load-error">{{ loadError }}</p>
