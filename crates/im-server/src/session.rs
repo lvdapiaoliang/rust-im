@@ -177,13 +177,14 @@ impl Sessions {
     #[must_use]
     pub fn new(config: SessionConfig) -> Self {
         let snowflake = Snowflake::new(config.machine_id, Arc::new(SystemClock));
+        let shard_count = config.shard_count;
         Self {
             inner: Arc::new(Inner {
-                config,
-                router: Router::new(64),
+                router: Router::new(shard_count),
                 snowflake: Mutex::new(snowflake),
                 offline: Mutex::new(HashMap::new()),
                 conn_seq: AtomicU64::new(0),
+                config,
             }),
         }
     }
