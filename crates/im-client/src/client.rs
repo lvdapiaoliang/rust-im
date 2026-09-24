@@ -619,13 +619,14 @@ mod tests {
             other => panic!("应收到 Rejected，实际 {other:?}"),
         }
 
-        // 拒绝后客户端退出：不再有事件（包括 Disconnected）
-        assert!(
-            timeout(Duration::from_millis(300), intruder.events.recv())
-                .await
-                .is_err(),
-            "被拒后不应继续重连"
-        );
+        // 拒绝后客户端退出：不再有任何事件。两种「安静」都合法——
+        // 超时（客户端已退出但通道未关）或 `None`（client_loop 结束时 drop
+        // 了发送端，recv 立即返回 None）。真正的失败是又收到新事件。
+        match timeout(Duration::from_millis(300), intruder.events.recv()).await {
+            Err(_elapsed) => {}
+            Ok(None) => {}
+            Ok(Some(event)) => panic!("被拒后不应继续重连，实际收到 {event:?}"),
+        }
     }
 
     /// 断线期间的消息命令在重连后被发出（命令排队即断线缓冲）。
