@@ -143,6 +143,26 @@ impl<V: Clone> Router<V> {
         }
     }
 
+    /// 谓词版注销：当当前值满足 `predicate` 时才移除，返回是否移除。
+    ///
+    /// [`unregister`](Self::unregister) 的泛化（值相等是一个谓词）——
+    /// 适合值无法廉价构造（如内部带 channel 的句柄）、
+    /// 但能回答「这条路由是不是我的」的场景。
+    ///
+    /// # Panics
+    ///
+    /// 分片锁中毒（持锁线程 panic）时 panic。
+    pub fn remove_if(&self, user_id: u64, predicate: impl FnOnce(&V) -> bool) -> bool {
+        let shard = &self.shards[self.shard_index(user_id)];
+        let mut guard = shard.lock().expect("路由表锁中毒");
+        if guard.get(&user_id).is_some_and(&predicate) {
+            guard.remove(&user_id);
+            true
+        } else {
+            false
+        }
+    }
+
     /// 查询：用户是否在线，在线返回句柄克隆。
     ///
     /// 为什么不返回引用？锁的守卫不能交出临界区（否则调用方握着锁
