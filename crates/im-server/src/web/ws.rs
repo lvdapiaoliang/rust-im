@@ -67,6 +67,9 @@ mod envelope_type {
     pub const PONG: &str = "pong";
     /// 下行：协议错误（坏信封/未知类型），连接不断。
     pub const ERROR: &str = "error";
+    /// 下行：服务端主动事件（好友请求/被接受/被删除等，阶段 6；
+    /// 载荷自带 `kind` 子类型——事件总线模式，新事件零协议改动）。
+    pub const EVENT: &str = "event";
 }
 
 /// 出站通道容量：下行推送（消息/事件/回执）+ 控制帧的缓冲上限。
@@ -251,6 +254,14 @@ impl FrameSink for WsSink {
             self.tx.send(Outbound::Text(text)).await.map_err(|_| TransportError::Closed)
         })
     }
+
+    fn send_text(&self, text: String) -> SendFuture<'_> {
+        // 事件信封直通（阶段 6）：文本已是组装好的完整信封，
+        // 与帧走同一条出站通道——保持写序 = 到达序
+        Box::pin(async move {
+            self.tx.send(Outbound::Text(text)).await.map_err(|_| TransportError::Closed)
+        })
+    }
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -345,7 +356,16 @@ async fn handle_socket(state: AppState, user_id: u64, socket: WebSocket) {
                             // welcome 即断开）
                             break;
                         }
-                        dispatch_inbound(&sessions, &mut session, conn_id, &sink, &tx, text.as_str()).await;
+                        dispatch_inbound(
+                            &state,
+                            &mut session,
+                            conn_id,
+                            user_id,
+                            &sink,
+                            &tx,
+                            text.as_str(),
+                        )
+                        .await;
                     }
                     Some(Ok(_)) => {} // Binary 等非文本帧：忽略（协议是文本 JSON）
                 }
@@ -359,11 +379,18 @@ async fn handle_socket(state: AppState, user_id: u64, socket: WebSocket) {
     let _ = outbound.send(Message::Close(None)).await;
 }
 
-/// 入站信封分发：解析 →（ping 就地回 / 业务帧翻译 → 去重 → 会话核心）。
+/// 入站信封分发：解析 →（ping 就地回 / 业务帧翻译 → 权限校验 → 去重 → 会话核心）。
+///
+/// 阶段 6 起单聊有**好友门槛**：`to` 不是群时，收发双方必须是好友
+/// （服务端校验，客户端伪造无效）。代价是每条消息两次主键点查
+/// （`is_group` / `is_friend`）——本地回环 PG 上是微秒级；阶段 7 群
+/// actor 与关系缓存上线后这条路径再优化。
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_inbound(
-    sessions: &Sessions,
+    state: &AppState,
     session: &mut SessionState,
     conn_id: u64,
+    user_id: u64,
     sink: &Arc<dyn FrameSink>,
     tx: &mpsc::Sender<Outbound>,
     text: &str,
@@ -389,13 +416,30 @@ async fn dispatch_inbound(
         }
         Ok(Some(frame)) => frame,
     };
+
+    // 好友门槛：单聊（to 不是群）要求收发双方已是好友
+    if frame.cmd == Cmd::Msg {
+        if let Ok(msg) = Msg::decode_frame(&frame) {
+            let is_group = state.groups.is_group(msg.to).await.unwrap_or(false);
+            let allowed =
+                is_group || state.friends.is_friend(user_id, msg.to).await.unwrap_or(false);
+            if !allowed {
+                let _ = tx.try_send(Outbound::Text(error_envelope(
+                    "not_friend",
+                    "仅好友之间可以发送消息",
+                )));
+                return;
+            }
+        }
+    }
+
     // 帧级去重：与 TCP 路径同一窗口同一语义（重发/乱序在业务前被挡下）
     match session.feed_seq(frame.seq) {
         im_transport::Verdict::Duplicate | im_transport::Verdict::TooFar { .. } => return,
         im_transport::Verdict::InOrder | im_transport::Verdict::OutOfOrder => {}
     }
 
-    handle_frame(sessions, session, conn_id, &frame, sink).await;
+    handle_frame(&state.sessions, session, conn_id, &frame, sink).await;
 }
 
 // ────────────────────────────────────────────────────────────────
