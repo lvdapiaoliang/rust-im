@@ -11,4 +11,6 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+im-protocol.workspace = true
+bytes.workspace = true
 thiserror.workspace = true

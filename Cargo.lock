@@ -263,6 +263,8 @@ dependencies = [
 name = "im-storage"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "im-protocol",
  "thiserror",
 ]
 
