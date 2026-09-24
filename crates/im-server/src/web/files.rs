@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
+use super::serde_id;
 use super::{id_i64, id_u64};
 use crate::session::Sessions;
 
@@ -42,9 +43,11 @@ pub const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
 /// 文件元数据。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileMeta {
-    /// 文件 ID（雪花，下载 URL 的 `{id}`）。
+    /// 文件 ID（雪花，下载 URL 的 `{id}`；JSON 形态为字符串）。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub id: u64,
     /// 上传者用户 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub owner_id: u64,
     /// 原始文件名（下载时回填 `Content-Disposition`）。
     pub filename: String,

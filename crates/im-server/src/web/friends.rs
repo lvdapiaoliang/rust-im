@@ -20,6 +20,7 @@ use sqlx::PgPool;
 use crate::session::Sessions;
 
 use super::account::User;
+use super::serde_id;
 use super::{id_i64, id_u64};
 
 /// 好友域错误。
@@ -46,12 +47,15 @@ pub enum FriendError {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FriendRequestView {
     /// 请求 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub id: u64,
     /// 发起方用户 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub from_user: u64,
     /// 发起方用户名。
     pub from_username: String,
     /// 接收方用户 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub to_user: u64,
     /// 接收方用户名。
     pub to_username: String,

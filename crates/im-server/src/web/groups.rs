@@ -2,6 +2,7 @@
 
 use sqlx::PgPool;
 
+use super::serde_id;
 use super::{id_i64, id_u64};
 use crate::session::Sessions;
 
@@ -25,11 +26,13 @@ pub enum GroupError {
 /// 群组实体。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Group {
-    /// 群 ID（雪花，即群消息的 `to`）。
+    /// 群 ID（雪花，即群消息的 `to`；JSON 形态为字符串）。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub id: u64,
     /// 群名。
     pub name: String,
     /// 群主用户 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub owner_id: u64,
 }
 
@@ -37,10 +40,12 @@ pub struct Group {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MyGroup {
     /// 群 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub id: u64,
     /// 群名。
     pub name: String,
     /// 群主用户 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
     pub owner_id: u64,
     /// 我的角色：`owner` / `member`。
     pub role: String,

@@ -18,6 +18,7 @@ use rand::rngs::OsRng;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::serde_id;
 use super::{id_i64, id_u64};
 use crate::session::Sessions;
 
@@ -44,7 +45,8 @@ pub enum AccountError {
 /// 用户实体（不含敏感字段——密码哈希留在仓储内部）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct User {
-    /// 用户 ID（雪花，即协议层 `user_id`）。
+    /// 用户 ID（雪花，即协议层 `user_id`；JSON 形态为字符串）。
+    #[serde(with = "serde_id")]
     pub id: u64,
     /// 登录名（唯一，注册时已小写化）。
     pub username: String,
