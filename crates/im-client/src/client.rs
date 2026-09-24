@@ -549,13 +549,18 @@ mod tests {
                         let sessions = sessions.clone();
                         let conn_id = sessions.next_conn_id();
                         let (_tx, rx) = shutdown_channel();
-                        tokio::spawn(im_server::serve_connection(
-                            &sessions,
-                            conn_id,
-                            stream,
-                            GatewayConfig::default(),
-                            rx,
-                        ));
+                        // move 进 owned clone：serve_connection 借用 sessions，
+                        // 而 tokio::spawn 要求 Future 满足 'static
+                        tokio::spawn(async move {
+                            let _ = im_server::serve_connection(
+                                &sessions,
+                                conn_id,
+                                stream,
+                                GatewayConfig::default(),
+                                rx,
+                            )
+                            .await;
+                        });
                     }
                 }
             }
@@ -642,13 +647,17 @@ mod tests {
                         let sessions = sessions.clone();
                         let conn_id = sessions.next_conn_id();
                         let (_tx, rx) = shutdown_channel();
-                        tokio::spawn(im_server::serve_connection(
-                            &sessions,
-                            conn_id,
-                            stream,
-                            GatewayConfig::default(),
-                            rx,
-                        ));
+                        // 同上：move 进 owned clone 满足 'static
+                        tokio::spawn(async move {
+                            let _ = im_server::serve_connection(
+                                &sessions,
+                                conn_id,
+                                stream,
+                                GatewayConfig::default(),
+                                rx,
+                            )
+                            .await;
+                        });
                     }
                 }
             }

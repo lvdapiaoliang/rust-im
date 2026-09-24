@@ -54,7 +54,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // stdin → send_msg；Ctrl-C → 退出
+    // stdin → send_msg；Ctrl-C → 退出。
+    // StdinLock 非 Send，不能跨 await 持有：每行解析后交给独立的发送 task，
+    // 输入循环本身零 await 点，future 才满足 tokio::spawn 的 Send 约束。
     let stdin = std::io::stdin();
     let input = tokio::spawn(async move {
         use std::io::BufRead;
@@ -69,7 +71,12 @@ async fn main() -> anyhow::Result<()> {
             if content.is_empty() {
                 continue;
             }
-            let _ = handle.send_msg(to, Bytes::copy_from_slice(content.as_bytes())).await;
+            let sender = handle.clone();
+            tokio::spawn(async move {
+                let _ = sender
+                    .send_msg(to, Bytes::copy_from_slice(content.as_bytes()))
+                    .await;
+            });
         }
         shutdown_tx.trigger();
     });
