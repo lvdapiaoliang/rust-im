@@ -30,7 +30,7 @@
 //! - 算法：位图滑动窗口、`trailing_zeros` 补洞；
 //! - 类型即文档：[`Verdict`] 四变体让「怎么处理这一帧」不需要 if-else 链。
 
-use im_protocol::Cmd;
+use im_protocol::Frame;
 
 /// 单个 seq 的判定结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,9 +97,17 @@ impl DedupWindow {
             return Verdict::Duplicate;
         }
         if seq == self.rcv_nxt {
-            // 按序：推进一格，再连续吸收位图低位的洞后已收帧
+            // 按序：推进一格；位图的语义基准随之前移——
+            // 旧 bit j 表示 rcv_nxt_old+1+j = rcv_nxt_new+j，
+            // 于是 bit0 恰好是「新的 rcv_nxt」是否已缓存：
+            // 为 1 则吸收并继续，直到遇到第一个洞。
             self.rcv_nxt += 1;
-            self.absorb_contiguous();
+            while self.bitmap & 1 == 1 {
+                self.bitmap >>= 1;
+                self.rcv_nxt += 1;
+            }
+            // 弹出终止循环的 0 位，恢复不变式「bit j = rcv_nxt+1+j」
+            self.bitmap >>= 1;
             return Verdict::InOrder;
         }
         // 前方：offset ∈ [1, WINDOW_SIZE] 可缓存
@@ -129,24 +137,6 @@ impl DedupWindow {
     #[must_use]
     pub fn backlog(&self) -> u32 {
         self.bitmap.count_ones()
-    }
-
-    /// 按序推进后吸收位图低位连续 1（补洞）。
-    ///
-    /// `trailing_zeros` 一次给出「低位连续多少个 1」——
-    /// 不用逐位循环，一条 CLZ/TZ 指令解决。
-    ///
-    /// 陷阱：`bitmap == 0` 时 `trailing_zeros()` 返回 64，
-    /// 而 `u64 >> 64` 是未定义移位（debug 下 panic）——
-    /// 全 0 与全 1（64 个）都必须特判。
-    fn absorb_contiguous(&mut self) {
-        let contiguous = self.bitmap.trailing_zeros(); // 低位连续 1 的个数
-        self.rcv_nxt += u64::from(contiguous);
-        self.bitmap = if contiguous >= u64::BITS {
-            0 // 全 1：整个位图被吸收
-        } else {
-            self.bitmap >> contiguous // 顶出已吸收的位
-        };
     }
 }
 
@@ -178,7 +168,7 @@ impl DedupWindow {
 impl DedupWindow {
     /// 与 [`feed`] 相同的判定，但直接吃 [`Frame`]（取 `frame.seq`）。
     #[must_use]
-    pub fn feed_frame(&mut self, frame: &im_protocol::Frame) -> Verdict {
+    pub fn feed_frame(&mut self, frame: &Frame) -> Verdict {
         self.feed(frame.seq)
     }
 }
@@ -222,7 +212,7 @@ mod tests {
         assert_eq!(w.feed(3), Verdict::Duplicate);
     }
 
-    /// 大洞散布：位图各处置位，最后一个洞补上时全部吸收
+    /// 大洞散布：位图各处置位，洞补上时全部吸收
     #[test]
     fn scattered_holes_collapse() {
         let mut w = DedupWindow::new(0);
@@ -232,8 +222,14 @@ mod tests {
             assert!(matches!(v, Verdict::OutOfOrder), "seq={seq} 应乱序缓存");
         }
         assert_eq!(w.ack(), 0, "洞未补，累计确认不动");
+        // 0 到达：吸收 0,1,2 后停在洞（3 未到），4,5 仍缓存
         assert_eq!(w.feed(0), Verdict::InOrder);
-        assert_eq!(w.ack(), 6, "洞补上：0,1,2,3(新),4,5 连续吸收");
+        assert_eq!(w.ack(), 3);
+        assert_eq!(w.backlog(), 2);
+        // 3 到达：剩下的 4,5 连着一起吸收完
+        assert_eq!(w.feed(3), Verdict::InOrder);
+        assert_eq!(w.ack(), 6);
+        assert_eq!(w.backlog(), 0);
     }
 
     /// 超窗：seq 落在窗口之外返回 TooFar 并携带期望值
@@ -284,7 +280,7 @@ mod tests {
     #[test]
     fn agrees_with_hashset_on_random_streams() {
         // 简易 xorshift，固定种子可复现
-        let mut rng: u64 = 0x2545F4914F6CDD1D;
+        let mut rng: u64 = 0x2545_F491_4F6C_DD1D;
         let mut next = || {
             rng ^= rng << 13;
             rng ^= rng >> 7;
@@ -313,7 +309,7 @@ mod tests {
                 }
                 // ack 语义对拍：ack 之前的所有 seq 都在 seen 里
                 for s in base..w.ack() {
-                    assert!(seen.contains(&s), "ack={0} 但 seq={s} 未收过", w.ack());
+                    assert!(seen.contains(&s), "ack={} 但 seq={s} 未收过", w.ack());
                 }
             }
         }
