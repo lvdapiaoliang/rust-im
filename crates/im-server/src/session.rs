@@ -427,9 +427,11 @@ pub async fn serve_connection(
         handle_frame(sessions, &mut state, conn_id, event).await;
     }
 
-    // ── 收尾：注销路由（带 conn_id 谓词校验，见 Sessions::unregister）
+    // ── 收尾：注销路由（带 conn_id 谓词校验，见 Sessions::unregister）。
+    // 返回值忽略是刻意的：若已被顶替（不可能——单端登录拒绝重复注册）
+    // 或服务正往下游收，不动就是对的。
     if let Some(user_id) = state.user {
-        sessions.unregister(user_id, conn_id);
+        let _ = sessions.unregister(user_id, conn_id);
     }
 
     // 连接生命周期的权威结论来自网关
