@@ -20,6 +20,7 @@ use sqlx::PgPool;
 use crate::session::Sessions;
 
 use super::account::User;
+use super::{id_i64, id_u64};
 
 /// 好友域错误。
 #[derive(Debug, thiserror::Error)]
@@ -92,7 +93,7 @@ impl FriendStore {
         }
         // 目标必须存在：外键其实兜底，但先查能给出更准确的业务错误
         let target: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE id = $1")
-            .bind(i64::try_from(to_user).expect("雪花 ID 装得下 i64"))
+            .bind(id_i64(to_user))
             .fetch_optional(&self.pool)
             .await?;
         if target.is_none() {
@@ -112,9 +113,9 @@ impl FriendStore {
              DO UPDATE SET status = 'pending'
              RETURNING id, from_user, to_user, status",
         )
-        .bind(i64::try_from(request_id).expect("雪花 ID 装得下 i64"))
-        .bind(i64::try_from(from_user).expect("雪花 ID 装得下 i64"))
-        .bind(i64::try_from(to_user).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(request_id))
+        .bind(id_i64(from_user))
+        .bind(id_i64(to_user))
         .fetch_one(&self.pool)
         .await?;
 
@@ -122,10 +123,10 @@ impl FriendStore {
         let (from_username, to_username) =
             self.fetch_usernames(row.1, row.2).await.ok_or(FriendError::UserNotFound)?;
         Ok(FriendRequestView {
-            id: u64::try_from(row.0).expect("雪花 ID 装得下 u64"),
-            from_user: u64::try_from(row.1).expect("雪花 ID 装得下 u64"),
+            id: id_u64(row.0),
+            from_user: id_u64(row.1),
             from_username,
-            to_user: u64::try_from(row.2).expect("雪花 ID 装得下 u64"),
+            to_user: id_u64(row.2),
             to_username,
             status: row.3,
         })
@@ -148,7 +149,7 @@ impl FriendStore {
              WHERE r.to_user = $1 AND r.status = 'pending'
              ORDER BY r.id",
         )
-        .bind(i64::try_from(user_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(user_id))
         .fetch_all(&self.pool)
         .await?;
 
@@ -160,7 +161,7 @@ impl FriendStore {
              WHERE r.from_user = $1 AND r.status = 'pending'
              ORDER BY r.id",
         )
-        .bind(i64::try_from(user_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(user_id))
         .fetch_all(&self.pool)
         .await?;
 
@@ -184,8 +185,8 @@ impl FriendStore {
              WHERE id = $1 AND to_user = $2 AND status = 'pending'
              RETURNING from_user",
         )
-        .bind(i64::try_from(request_id).expect("雪花 ID 装得下 i64"))
-        .bind(i64::try_from(by_user).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(request_id))
+        .bind(id_i64(by_user))
         .fetch_optional(&mut *tx)
         .await?;
 
@@ -196,8 +197,8 @@ impl FriendStore {
         };
 
         // 无向边：小 ID 恒在前（表结构 CHECK 兜底）
-        let a = from_user.min(i64::try_from(by_user).expect("雪花 ID 装得下 i64"));
-        let b = from_user.max(i64::try_from(by_user).expect("雪花 ID 装得下 i64"));
+        let a = from_user.min(id_i64(by_user));
+        let b = from_user.max(id_i64(by_user));
         // 已是好友（互相发起等场景）：边幂等吞掉，请求状态照常推进
         sqlx::query(
             "INSERT INTO friends (user_a, user_b) VALUES ($1, $2)
@@ -222,8 +223,8 @@ impl FriendStore {
             "UPDATE friend_requests SET status = 'rejected'
              WHERE id = $1 AND to_user = $2 AND status = 'pending'",
         )
-        .bind(i64::try_from(request_id).expect("雪花 ID 装得下 i64"))
-        .bind(i64::try_from(by_user).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(request_id))
+        .bind(id_i64(by_user))
         .execute(&self.pool)
         .await?
         .rows_affected();
@@ -246,7 +247,7 @@ impl FriendStore {
              WHERE f.user_a = $1 OR f.user_b = $1
              ORDER BY u.id",
         )
-        .bind(i64::try_from(user_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(user_id))
         .fetch_all(&self.pool)
         .await?;
         Ok(users)
@@ -258,8 +259,8 @@ impl FriendStore {
     ///
     /// 本就不是好友时返回 [`FriendError::RequestNotFound`]（复用「关系不存在」语义）。
     pub async fn remove_friend(&self, me: u64, other: u64) -> Result<(), FriendError> {
-        let a = i64::try_from(me.min(other)).expect("雪花 ID 装得下 i64");
-        let b = i64::try_from(me.max(other)).expect("雪花 ID 装得下 i64");
+        let a = id_i64(me.min(other));
+        let b = id_i64(me.max(other));
         let deleted = sqlx::query("DELETE FROM friends WHERE user_a = $1 AND user_b = $2")
             .bind(a)
             .bind(b)
@@ -288,13 +289,13 @@ impl FriendStore {
     }
 }
 
-/// 行元组 → 视图（pending_requests 的辅助）。
+/// 行元组 → 视图（`pending_requests` 的辅助）。
 fn to_view(row: (i64, i64, String, i64, String)) -> FriendRequestView {
     FriendRequestView {
-        id: u64::try_from(row.0).expect("雪花 ID 装得下 u64"),
-        from_user: u64::try_from(row.1).expect("雪花 ID 装得下 u64"),
+        id: id_u64(row.0),
+        from_user: id_u64(row.1),
         from_username: row.2,
-        to_user: u64::try_from(row.3).expect("雪花 ID 装得下 u64"),
+        to_user: id_u64(row.3),
         to_username: row.4,
         status: "pending".to_string(),
     }
