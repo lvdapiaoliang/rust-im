@@ -410,7 +410,7 @@ pub async fn serve_connection(
             Verdict::Duplicate | Verdict::TooFar { .. } => continue, // 丢弃
             Verdict::InOrder | Verdict::OutOfOrder => {}               // 上递
         }
-        handle_frame(sessions, &mut state, event).await;
+        handle_frame(sessions, &mut state, conn_id, event).await;
     }
 
     // ── 收尾：注销路由（带 conn_id 谓词校验，见 Sessions::unregister）
@@ -429,12 +429,19 @@ pub async fn serve_connection(
 /// 解码失败的帧**丢弃而非断连**：坏载荷无法威胁会话状态
 /// （状态机不推进），恶意流充其量浪费一点 CPU——这是「容忍与隔离」
 /// 对「严格断连」的取舍，阶段 7 引入限流后再收紧。
-async fn handle_frame(sessions: &Sessions, state: &mut SessionState, event: InboundFrame) {
+async fn handle_frame(
+    sessions: &Sessions,
+    state: &mut SessionState,
+    conn_id: u64,
+    event: InboundFrame,
+) {
     let frame = event.frame;
     let handle = &event.handle;
 
     match frame.cmd {
-        im_protocol::Cmd::Handshake => handle_handshake(sessions, state, handle, &frame).await,
+        im_protocol::Cmd::Handshake => {
+            handle_handshake(sessions, state, conn_id, handle, &frame).await
+        }
         im_protocol::Cmd::Msg => handle_msg(sessions, state, handle, &frame).await,
         im_protocol::Cmd::SyncReq => handle_sync(sessions, state, handle, &frame).await,
         // Ping/Pong 由网关消化或心跳产生；未知命令字进不到这里
@@ -447,6 +454,7 @@ async fn handle_frame(sessions: &Sessions, state: &mut SessionState, event: Inbo
 async fn handle_handshake(
     sessions: &Sessions,
     state: &mut SessionState,
+    conn_id: u64,
     handle: &ConnectionHandle,
     frame: &im_protocol::Frame,
 ) {
@@ -475,7 +483,7 @@ async fn handle_handshake(
         return;
     };
 
-    let ack = match sessions.register(hs.user_id, frame.seq, handle.clone()) {
+    let ack = match sessions.register(hs.user_id, conn_id, handle.clone()) {
         Err(_) => HandshakeAck::rejected("already online"), // 单端登录：顶不掉旧连接
         Ok(()) => {
             state.user = Some(hs.user_id);
