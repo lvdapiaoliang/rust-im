@@ -45,14 +45,15 @@ use std::time::Duration;
 
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
 use im_transport::{
-    ConnectionHandle, DedupWindow, GatewayConfig, InboundFrame, ShutdownRx, ShutdownTx,
-    TransportError, Verdict, run_gateway_connection, shutdown_channel,
+    DedupWindow, GatewayConfig, InboundFrame, ShutdownRx, ShutdownTx, TransportError, Verdict,
+    shutdown_channel, spawn_gateway,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use crate::router::{Router, RouterError};
+use crate::sink::FrameSink;
 use crate::snowflake::{Snowflake, SnowflakeError, SystemClock};
 
 /// 每用户离线消息上限（默认值）：超出丢最老的（内存保护的取舍）。
@@ -136,15 +137,16 @@ impl Default for SessionConfig {
 /// - `conn_id`：注销时的**身份凭据**——收尾逻辑用它做谓词校验
 ///   （见 [`Router::remove_if`]），防止旧连接误删新连接的注册；
 /// - `send_seq`：服务端 → 该连接的下行帧序号。原子计数器放在这里，
-///   任何 task 投递消息时 `fetch_add` 都不冲突（无锁分配序号）。
+///   任何 task 投递消息时 `fetch_add` 都不冲突（无锁分配序号）；
+/// - `sink`：帧发送端抽象（TCP 写 actor / WS 出站通道，对会话核心透明）。
 #[derive(Debug, Clone)]
 pub struct SessionHandle {
     /// 连接唯一 ID（`Sessions` 分配，进程内递增）。
     pub conn_id: u64,
     /// 下行帧序号分配器。
     pub send_seq: Arc<AtomicU64>,
-    /// 回话句柄。
-    pub handle: ConnectionHandle,
+    /// 帧发送端（依赖倒置：会话核心只认 [`FrameSink`]）。
+    pub sink: Arc<dyn FrameSink>,
 }
 
 /// 会话中心：路由表 + 雪花 ID + 离线暂存（共享状态，`Arc` 克隆）。
@@ -220,6 +222,9 @@ impl Sessions {
 
     /// 注册上线（握手成功后调用）。
     ///
+    /// `sink` 是帧发送端抽象：TCP 路径传 `ConnectionHandle` 的适配，
+    /// WS 路径（阶段 5 web 模块）传自己的实现——会话核心不区分。
+    ///
     /// # Errors
     ///
     /// 该用户已在线时返回 [`RouterError::AlreadyOnline`]。
@@ -227,10 +232,10 @@ impl Sessions {
         &self,
         user_id: u64,
         conn_id: u64,
-        handle: ConnectionHandle,
+        sink: Arc<dyn FrameSink>,
     ) -> Result<(), RouterError> {
         let session_handle =
-            SessionHandle { conn_id, send_seq: Arc::new(AtomicU64::new(0)), handle };
+            SessionHandle { conn_id, send_seq: Arc::new(AtomicU64::new(0)), sink };
         self.inner.router.register(user_id, session_handle)
     }
 
@@ -270,7 +275,7 @@ impl Sessions {
         if let Some(session) = self.inner.router.get(msg.to) {
             // 无锁分配下行序号：多个发送方同时投递也不冲突
             let seq = session.send_seq.fetch_add(1, Ordering::Relaxed) + 1;
-            if session.handle.send(msg.encode_frame(seq, 0)).await.is_ok() {
+            if session.sink.send(msg.encode_frame(seq, 0)).await.is_ok() {
                 return; // 在线送达
             }
         }
@@ -359,13 +364,15 @@ impl SessionState {
 }
 
 /// 回一帧载荷：分配下行 seq，填帧级累计确认，送出。
+///
+/// `sink` 是抽象发送端——TCP 与 WS 路径在此汇合（传输解耦的落点）。
 async fn reply<T: Payload>(
     state: &mut SessionState,
-    handle: &ConnectionHandle,
+    sink: &Arc<dyn FrameSink>,
     payload: &T,
 ) -> Result<(), TransportError> {
     state.send_seq += 1;
-    handle.send(payload.encode_frame(state.send_seq, state.ack())).await
+    sink.send(payload.encode_frame(state.send_seq, state.ack())).await
 }
 
 /// 单条连接的会话 task：认证、路由、同步，以及连接死亡后的收尾。
@@ -393,7 +400,11 @@ pub async fn serve_connection(
 ) -> Result<(), TransportError> {
     // 网关 → 会话 task 的本地通道（与外界无涉，容量即反压点）
     let (frame_tx, mut frame_rx) = mpsc::channel::<InboundFrame>(SESSION_CHANNEL_CAPACITY);
-    let gateway = tokio::spawn(run_gateway_connection(stream, gateway_config, frame_tx, shutdown));
+    // spawn_gateway 立刻返回发送句柄：首个入站帧到达之前就能包装出
+    // FrameSink——一次包装，整条连接复用（比每帧包一次 Arc 划算）
+    let (handle, gateway) = spawn_gateway(stream, gateway_config, frame_tx, shutdown);
+    // TCP 句柄 → 帧发送端抽象（传输解耦：会话核心从此只认 FrameSink）
+    let sink: Arc<dyn FrameSink> = Arc::new(handle);
 
     let mut state = SessionState::new();
 
@@ -404,7 +415,7 @@ pub async fn serve_connection(
             Verdict::Duplicate | Verdict::TooFar { .. } => continue, // 丢弃
             Verdict::InOrder | Verdict::OutOfOrder => {}             // 上递
         }
-        handle_frame(sessions, &mut state, conn_id, event).await;
+        handle_frame(sessions, &mut state, conn_id, &event.frame, &sink).await;
     }
 
     // ── 收尾：注销路由（带 conn_id 谓词校验，见 Sessions::unregister）。
@@ -415,7 +426,7 @@ pub async fn serve_connection(
     }
 
     // 连接生命周期的权威结论来自网关
-    gateway.await.expect("网关 task 不应 panic")
+    gateway.expect("网关 task 不应 panic").await
 }
 
 /// 业务帧分发：握手 / 消息 / 同步三正餐，其余忽略。
@@ -423,21 +434,22 @@ pub async fn serve_connection(
 /// 解码失败的帧**丢弃而非断连**：坏载荷无法威胁会话状态
 /// （状态机不推进），恶意流充其量浪费一点 CPU——这是「容忍与隔离」
 /// 对「严格断连」的取舍，阶段 7 引入限流后再收紧。
+///
+/// 帧与发送端分开传：`frame` 是协议层解码产物，`sink` 是抽象发送端
+/// ——TCP 与 WS 路径都能调这里（WS 网关把 JSON 信封译成 Frame 后复用）。
 async fn handle_frame(
     sessions: &Sessions,
     state: &mut SessionState,
     conn_id: u64,
-    event: InboundFrame,
+    frame: &im_protocol::Frame,
+    sink: &Arc<dyn FrameSink>,
 ) {
-    let frame = event.frame;
-    let handle = &event.handle;
-
     match frame.cmd {
         im_protocol::Cmd::Handshake => {
-            handle_handshake(sessions, state, conn_id, handle, &frame).await;
+            handle_handshake(sessions, state, conn_id, sink, frame).await;
         }
-        im_protocol::Cmd::Msg => handle_msg(sessions, state, handle, &frame).await,
-        im_protocol::Cmd::SyncReq => handle_sync(sessions, state, handle, &frame).await,
+        im_protocol::Cmd::Msg => handle_msg(sessions, state, sink, frame).await,
+        im_protocol::Cmd::SyncReq => handle_sync(sessions, state, sink, frame).await,
         // Ping/Pong 由网关消化或心跳产生；未知命令字进不到这里
         // （解码层已拦截 `UnknownCommand`）
         _ => {}
@@ -449,7 +461,7 @@ async fn handle_handshake(
     sessions: &Sessions,
     state: &mut SessionState,
     conn_id: u64,
-    handle: &ConnectionHandle,
+    sink: &Arc<dyn FrameSink>,
     frame: &im_protocol::Frame,
 ) {
     let Ok(hs) = Handshake::decode_frame(frame) else {
@@ -459,38 +471,38 @@ async fn handle_handshake(
     // 重复握手：同一连接不允许二次登录（要换账号请重连）
     if state.user.is_some() {
         let ack = HandshakeAck::rejected("already authenticated");
-        let _ = reply(state, handle, &ack).await;
+        let _ = reply(state, sink, &ack).await;
         return;
     }
 
     let authenticator = sessions.config().authenticator.as_ref();
     if !authenticator.authenticate(hs.user_id, &hs.token) {
         let ack = HandshakeAck::rejected("bad credentials");
-        let _ = reply(state, handle, &ack).await;
+        let _ = reply(state, sink, &ack).await;
         return;
     }
 
     // 会话 ID 也由雪花分配（与 msg_id 同源，全局唯一）
     let Some(session_id) = sessions.next_id().await else {
         let ack = HandshakeAck::rejected("id generator unavailable");
-        let _ = reply(state, handle, &ack).await;
+        let _ = reply(state, sink, &ack).await;
         return;
     };
 
-    let ack = if sessions.register(hs.user_id, conn_id, handle.clone()).is_err() {
+    let ack = if sessions.register(hs.user_id, conn_id, Arc::clone(sink)).is_err() {
         HandshakeAck::rejected("already online") // 单端登录：顶不掉旧连接
     } else {
         state.user = Some(hs.user_id);
         HandshakeAck::accepted(session_id)
     };
-    let _ = reply(state, handle, &ack).await;
+    let _ = reply(state, sink, &ack).await;
 }
 
 /// 上行消息：覆盖发送者身份 → 分配全局 ID → 路由/离线 → 回 `MsgAck`。
 async fn handle_msg(
     sessions: &Sessions,
     state: &mut SessionState,
-    handle: &ConnectionHandle,
+    sink: &Arc<dyn FrameSink>,
     frame: &im_protocol::Frame,
 ) {
     // 未登录先说话：丢弃（不回执，客户端超时重发后自然回到正轨）
@@ -520,14 +532,14 @@ async fn handle_msg(
     // 消息级确认：`msg_id` 供排序/同步游标，`client_msg_id` 供发送方
     // 核销重发表（重发会换新 `msg_id`，只有客户端键跨重发稳定）
     let ack = MsgAck { msg_id, client_msg_id: upstream.client_msg_id };
-    let _ = reply(state, handle, &ack).await;
+    let _ = reply(state, sink, &ack).await;
 }
 
 /// 离线同步：按游标拉取一批，空批 = 「没有更多」。
 async fn handle_sync(
     sessions: &Sessions,
     state: &mut SessionState,
-    handle: &ConnectionHandle,
+    sink: &Arc<dyn FrameSink>,
     frame: &im_protocol::Frame,
 ) {
     let Some(user_id) = state.user else {
@@ -540,7 +552,7 @@ async fn handle_sync(
     let batch = sessions.config().sync_batch_size;
     let messages = sessions.sync_since(user_id, req.since, batch);
     let resp = SyncResp { messages };
-    let _ = reply(state, handle, &resp).await;
+    let _ = reply(state, sink, &resp).await;
 }
 
 // ────────────────────────────────────────────────────────────────
