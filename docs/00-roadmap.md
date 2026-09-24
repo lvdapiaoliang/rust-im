@@ -24,7 +24,7 @@ rust-im 是一个用 Rust 从零构建的开源 IM（即时通讯）全栈项目
 | 可靠 | 100ms RTT + 10% 丢包下到达率 99.999% | ACK + 指数退避重传 + 去重 | 未开始 |
 
 > 说明：「500 万并发」是 C10M 级世界难题，作为项目愿景保留。真实的优化过程
-> （哪怕最终停在 200 万）远比口号有价值——每个瓶颈、每次火焰图分析都会写进 docs/08。
+> （哪怕最终停在 200 万）远比口号有价值——每个瓶颈、每次火焰图分析都会写进 docs/16。
 
 ## 二、代码结构
 
@@ -39,6 +39,8 @@ crates/
 ├── im-sdk/        FFI SDK：C ABI 动态库（.so/.dll/.dylib）+ JNI 示例
 ├── im-bench/      压测：连接风暴、吞吐基准、用户态弱网模拟
 └── xtask/         构建任务：交叉编译、SDK 打包（cargo xtask <task>）
+
+web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 cargo 成员）
 ```
 
 依赖方向（自底向上）：
@@ -55,14 +57,24 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 |------|------|----------|----------|------|
 | 0 | workspace 骨架 + echo 热身 | `im-transport/src/echo.rs` | 01、02、03 | ✅ 已完成 |
 | 1 | 二进制协议：帧格式 / 编解码 / 粘包 | `im-protocol` | 04 | ✅ 已完成 |
-| 2 | 传输层：心跳 / 重连 / seq-ACK / 优雅关闭（TLS 移至阶段 7 前置实现） | `im-transport` | 05 | ✅ 已完成 |
+| 2 | 传输层：心跳 / 重连 / seq-ACK / 优雅关闭（TLS 移至阶段 12 前置实现） | `im-transport` | 05 | ✅ 已完成 |
 | 3 | 服务端：会话路由 / 离线补投 / 雪花 ID + 最小客户端 + e2e | `im-server` + `im-client` | 06 | ✅ 已完成 |
 | 4 | 客户端：消息重传 / 本地库 / TUI / 消息同步 | `im-client` + `im-storage` | 07 | ✅ 已完成 |
-| 5 | 压测与三级性能里程碑 | `im-bench` | 08 | 未开始 |
-| 6 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 09 | 未开始 |
-| 7 | 桌面端（Tauri）+ E2EE（Signal） | `im-client` + `im-crypto` | 10 | 未开始 |
-| 8 | QUIC（quinn）+ 挂载盘（FUSE/WinFsp） | 扩展 | 11 | 未开始 |
-| 9 | 开源工程化：CI 矩阵 / 版本 / 文档站 | `.github` | — | 未开始 |
+| 5 | Web 接入与持久化：FrameSink 解耦 + REST + WS 网关 + PostgreSQL + Vue 前端 | `im-server/src/web` + `web/` | 12 | ✅ 已完成 |
+| 6 | 好友系统全流程 + 富媒体消息（文件 / 表情） | `im-server/src/web` + `web/` | 12 | 未开始 |
+| 7 | 群组 + 2 万人同时在线（群扇出 actor + 慢消费者隔离） | `im-server` + `im-bench` | 13 | 未开始 |
+| 8 | 1对1 音视频 + 远程桌面（WebRTC P2P，WS 信令） | `web/` + `im-server/src/web` | 14 | 未开始 |
+| 9 | 群会议 + 屏幕共享（LiveKit SFU + docker-compose） | `web/` + `im-server/src/web` | 15 | 未开始 |
+| 10 | 压测与三级性能里程碑 | `im-bench` | 16 | 未开始 |
+| 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | 未开始 |
+| 12 | 桌面端（Tauri）+ E2EE（Signal） | `im-client` + `im-crypto` | 18 | 未开始 |
+| 13 | QUIC（quinn）+ 挂载盘（FUSE/WinFsp） | 扩展 | 19 | 未开始 |
+| 14 | 开源工程化：CI 矩阵 / 版本 / 文档站 | `.github` | — | 未开始 |
+
+> 阶段重排说明（阶段 5 收尾时定稿）：原阶段 5~9（压测 / FFI / 桌面+E2EE /
+> QUIC / 工程化）顺延为 10~14，为 Web 接入与社交功能（好友、群组、
+> 音视频、会议）让出 5~9。理由：先补齐业务形态再冲刺性能里程碑，
+> 好友/群组关系也能给压测提供更真实的负载模型（点对点 + 群扇出）。
 
 ## 四、知识图谱：岗位要求 ↔ 项目模块 ↔ 文档
 
@@ -81,7 +93,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | Pin、自引用结构体、`Pin<&mut T>` | 文档 02 | 阶段 2 自定义 Future |
 | async/await 原理、Waker | 文档 03 | 阶段 2 手写一个简化版 `join` |
 | Tokio 多线程调度、spawn、阻塞任务 | 文档 03 | `echo.rs`（已实现）、阶段 3 网关 |
-| io_uring | 文档 08 | 阶段 5 M2 里程碑 |
+| io_uring | 文档 16 | 阶段 10 M2 里程碑 |
 
 ### 4.2 网络编程与 IM
 
@@ -90,30 +102,32 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | TCP 字节流本质、粘包/半包 | 文档 04 | 阶段 1 帧编解码器 + proptest 模糊测试 |
 | 心跳、断线重连（指数退避） | 文档 05 | 阶段 2 `im-transport` |
 | 消息 ACK、有序性、去重窗口 | 文档 05 | 阶段 2 seq/ack 机制 |
-| 弱网优化、100ms RTT + 10% 丢包 | 文档 08 | 阶段 5 用户态弱网模拟器 |
-| QUIC | 文档 11 | 阶段 8 quinn 集成与 TCP 对比 |
-| TLS/mTLS 握手 | 文档 10 | 阶段 2 rustls |
-| E2EE / Signal 协议 | 文档 10 | 阶段 7 X3DH + 双棘轮实现 |
+| 弱网优化、100ms RTT + 10% 丢包 | 文档 16 | 阶段 10 用户态弱网模拟器 |
+| WebSocket / WebRTC | 文档 12、14 | 阶段 5 WS 网关（JSON 信封）、阶段 8 P2P 音视频 |
+| QUIC | 文档 19 | 阶段 13 quinn 集成与 TCP 对比 |
+| TLS/mTLS 握手 | 文档 18 | 阶段 12 前置实现的 rustls |
+| E2EE / Signal 协议 | 文档 18 | 阶段 12 X3DH + 双棘轮实现 |
 
 ### 4.3 跨平台与 FFI
 
 | 岗位要求 | 在哪里学 | 在哪里练 |
 |----------|----------|----------|
-| C ABI、句柄式 API 设计 | 文档 09 | 阶段 6 `im-sdk` |
-| 跨语言内存释放（谁分配谁释放） | 文档 09 | 阶段 6 `im_sdk_free` 系列 |
-| .so / .dll / .dylib 产物 | 文档 09 | 阶段 6 + xtask 打包 |
-| 交叉编译 Android/iOS | 文档 09 | 阶段 6 xtask cross 任务 |
-| 字符串编码坑（UTF-8 / UTF-16 / char*） | 文档 09 | 阶段 6 |
-| Flutter/Electron/RN 集成 | 文档 10 | 阶段 7 Tauri 桌面端 |
+| C ABI、句柄式 API 设计 | 文档 17 | 阶段 11 `im-sdk` |
+| 跨语言内存释放（谁分配谁释放） | 文档 17 | 阶段 11 `im_sdk_free` 系列 |
+| .so / .dll / .dylib 产物 | 文档 17 | 阶段 11 + xtask 打包 |
+| 交叉编译 Android/iOS | 文档 17 | 阶段 11 xtask cross 任务 |
+| 字符串编码坑（UTF-8 / UTF-16 / char*） | 文档 17 | 阶段 11 |
+| Flutter/Electron/RN 集成 | 文档 18 | 阶段 12 Tauri 桌面端 |
 
 ### 4.4 工程化与业务
 
 | 岗位要求 | 在哪里学 | 在哪里练 |
 |----------|----------|----------|
-| SDK 从 0 到 1 设计（API/错误模型/版本兼容） | 文档 09 | 阶段 6 |
-| 背压、扇出风暴、内存账本 | 文档 06 | 阶段 3 服务端 |
-| 压测方法、火焰图、量化优化 | 文档 08 | 阶段 5 |
-| 挂载盘（FUSE / WinFsp / 元数据缓存） | 文档 11 | 阶段 8 |
+| SDK 从 0 到 1 设计（API/错误模型/版本兼容） | 文档 17 | 阶段 11 |
+| 背压、扇出风暴、内存账本 | 文档 06、13 | 阶段 3 服务端、阶段 7 群扇出 |
+| 压测方法、火焰图、量化优化 | 文档 16 | 阶段 10 |
+| 挂载盘（FUSE / WinFsp / 元数据缓存） | 文档 19 | 阶段 13 |
+| Web 全栈（REST/WS 网关/前端状态管理） | 文档 12 | 阶段 5~9（axum + Vue 双端） |
 
 ### 4.5 算法、数据结构与设计模式图谱
 
@@ -129,12 +143,13 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 定长去重窗口（滑动窗口 + 位图/HashSet） | 消息 seq 去重与乱序重排 | 阶段 2 |
 | 哈希定时轮（Hashed Timing Wheel） | 心跳超时、重连退避、消息重传定时器（Kafka 同款，比每个定时器一个堆便宜得多） | 阶段 2 手写 |
 | 一致性哈希环 + 虚拟节点 | 服务端分布式路由预留 | 阶段 3 手写 |
-| LRU 缓存（HashMap + 双向链表） | 服务端会话/元数据缓存、挂载盘目录缓存 | 阶段 3/8 手写，对比 `lru` crate |
+| LRU 缓存（HashMap + 双向链表） | 服务端会话/元数据缓存、挂载盘目录缓存 | 阶段 3/13 手写，对比 `lru` crate |
 | 分片并发哈希表（Sharded HashMap） | 会话路由表：理解 `DashMap` 内部的锁分片思想 | 阶段 3 手写简化版 |
 | 雪花 ID（位段分配 + 时钟回拨处理） | 全局消息 ID 生成 | 阶段 3 |
-| 小顶堆 / 分位数草图 | P99 延迟统计（压测的核心数据结构） | 阶段 5 |
+| 群成员快照 + 每群写 actor | 群消息扇出：成员列表缓存，DB 变更时失效 | 阶段 7 |
+| 小顶堆 / 分位数草图 | P99 延迟统计（压测的核心数据结构） | 阶段 10 |
 | B+ 树 / LSM 思想 | 本地消息库索引、写前日志（理解 SQLite/RocksDB 原理） | 阶段 4（自研简化 LSM） |
-| 布隆过滤器 | 在线状态/已读去重的概率性预判 | 阶段 8 扩展 |
+| 布隆过滤器 | 在线状态/已读去重的概率性预判 | 阶段 13 扩展 |
 
 #### 算法
 
@@ -146,27 +161,29 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 滑动窗口协议（类 TCP 可靠传输） | 消息有序、去重、重传——IM 可靠性的核心 | 阶段 2（自己在应用层实现一遍，彻底搞懂 TCP） |
 | 最长连续 seq 查找 | 去重窗口内乱序消息的提交判断 | 阶段 2 |
 | 一致性哈希查找 O(log n)（有序环 + 二分） | 路由 | 阶段 3 |
-| 基数估计与分位数（HdrHistogram 思想） | 压测延迟分布 | 阶段 5 |
-| HKDF / X25519 / 双棘轮 KDF 链 | E2EE 密钥推导 | 阶段 7 |
-| 概率丢包模型（丢包/乱序/延迟注入） | 弱网模拟器：可重现的确定性随机 | 阶段 5 |
+| 基数估计与分位数（HdrHistogram 思想） | 压测延迟分布 | 阶段 10 |
+| HKDF / X25519 / 双棘轮 KDF 链 | E2EE 密钥推导 | 阶段 12 |
+| 概率丢包模型（丢包/乱序/延迟注入） | 弱网模拟器：可重现的确定性随机 | 阶段 10 |
 
 #### 设计模式（以 GoF 为纲，全部来自本项目真实需求）
 
 | 模式 | 在本项目中的形态 | 阶段 |
 |------|------------------|------|
 | 状态机（State） | 协议解码器状态、连接生命周期（Connecting/Handshaking/Active/Reconnecting） | 1/2 |
-| 策略（Strategy） | 重连退避策略、压缩算法选择、弱网模拟策略 | 2/5 |
+| 策略（Strategy） | 重连退避策略、压缩算法选择、弱网模拟策略 | 2/10 |
 | 编解码器（Encoder/Decoder，GoF 外的新范式） | 帧编解码，`Framed` 组合 `TcpStream` | 1/2 |
 | 装饰器（Decorator） | `TcpStream` → TLS 流 → 帧流的层层包装（零成本抽象的典型） | 2 |
-| 观察者/发布订阅（Observer/Pub-Sub） | 消息路由扇出、SDK 事件回调 | 3/6 |
+| 适配器（Adapter） | WS 网关：JSON 信封 ↔ 二进制帧翻译层（`web/ws.rs`）——同一会话核心适配两种传输 | 5 |
+| 仓库模式（Repository） | web 模块仓储层（account/friends/groups/files），SQL 细节不出仓储（Java 对照 Spring Data） | 5 |
+| 观察者/发布订阅（Observer/Pub-Sub） | 消息路由扇出、SDK 事件回调 | 3/11 |
 | Actor 模型 | 每连接一个 task + channel 通信，无共享内存 | 3 |
 | 责任链（Chain of Responsibility） | 服务端包处理流水线：解码→鉴权→限流→路由 | 3 |
 | 生成器（Builder） | 复杂帧/配置对象的构建 | 1/2 |
-| 句柄/门面（Handle/Facade） | FFI SDK 的唯一对外形态：不透明指针 + 极简 C API | 6 |
-| 回调注册（回调即观察者的 C 形态） | SDK 跨语言事件推送 | 6 |
+| 句柄/门面（Handle/Facade） | FFI SDK 的唯一对外形态：不透明指针 + 极简 C API | 11 |
+| 回调注册（回调即观察者的 C 形态） | SDK 跨语言事件推送 | 11 |
 | 错误码模型（Result 惯用法替代异常） | SDK 错误契约、`thiserror`/`anyhow` 分层 | 全程 |
 | NEWTYPE（Rust 特有） | `UserId(u64)`、`Seq(u64)`——零成本类型安全 | 全程 |
-| 类型状态（Typestate） | 编译期保证「未连接的句柄不能发消息」（连接状态进类型） | 6 进阶 |
+| 类型状态（Typestate） | 编译期保证「未连接的句柄不能发消息」（连接状态进类型） | 11 进阶 |
 
 > Rust 的特别之处：一半的经典 GoF 模式（单例、工厂、命令）在 Rust 里被
 > **所有权、trait、泛型、NEWTYPE** 以更轻的方式覆盖了；同时 Rust 也有自己的
@@ -183,11 +200,18 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 05-network-tokio.md    （阶段 2）网络编程深入
 06-server-arch.md      （阶段 3）服务端架构
 07-client.md           （阶段 4）客户端
-08-perf.md             （阶段 5）性能压测与调优
-09-ffi.md              （阶段 6）FFI SDK
-10-e2ee.md             （阶段 7）端到端加密
-11-quic-fuse.md        （阶段 8）QUIC 与挂载盘
+12-web-protocol.md     （阶段 5）Web 协议：REST + WS JSON 信封、双传输适配
+13-group-fanout.md     （阶段 7）群消息扇出与 2 万人在线
+14-webrtc.md           （阶段 8）WebRTC 音视频与远程桌面
+15-meeting.md          （阶段 9）群会议与屏幕共享（LiveKit）
+16-perf.md             （阶段 10）性能压测与调优
+17-ffi.md              （阶段 11）FFI SDK
+18-e2ee.md             （阶段 12）端到端加密与桌面端
+19-quic-fuse.md        （阶段 13）QUIC 与挂载盘
 ```
+
+> 文档编号即写作顺序：08~11 因阶段重排让位给 Web 系列（12~15），
+> 原性能/FFI/加密/QUIC 文档顺延为 16~19。
 
 每份文档统一结构：**本章目标 → 概念讲解（Java 对照）→ 本项目真实代码走读 → 算法/数据结构/设计模式实战（若本章涉及 4.5 图谱内容）→ 动手练习 → 面试题与标准回答**。
 
