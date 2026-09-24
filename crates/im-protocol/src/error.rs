@@ -67,6 +67,29 @@ pub enum ProtocolError {
         /// 帧尾携带的 CRC。
         got: u32,
     },
+
+    /// payload 比字段声明需要的还短（截断的载荷）。
+    ///
+    /// 与帧层的截断不同：帧本身是完整的（CRC 过了），
+    /// 但载荷内部的字段序列不满足格式——对端编码器有 bug。
+    #[error("payload truncated: need {need} more bytes, got {got}")]
+    PayloadTooShort {
+        /// 还缺多少字节。
+        need: usize,
+        /// 实际剩余字节数。
+        got: usize,
+    },
+
+    /// 载荷中声明了非法的字符串：UTF-8 序列损坏。
+    #[error("invalid utf-8 in payload string")]
+    InvalidUtf8,
+
+    /// 载荷解析完字段后还有剩余字节（两端的载荷格式不一致）。
+    #[error("payload has {extra} trailing bytes")]
+    TrailingBytes {
+        /// 多余的字节数。
+        extra: usize,
+    },
 }
 
 #[cfg(test)]
