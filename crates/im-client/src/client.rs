@@ -437,11 +437,21 @@ mod tests {
     }
 
     /// 等待下一个事件（断言在 WAIT 内到达）。
+    ///
+    /// 每次连接建立后的自动同步会例行产生一个空 `SyncBatch`——
+    /// 那是连接层的噪音而非业务信号，统一在这里跳过；
+    /// 非空批量（离线补投）依然原样上递。
     async fn next_event(events: &mut mpsc::Receiver<ClientEvent>) -> ClientEvent {
-        timeout(WAIT, events.recv())
-            .await
-            .expect("2s 内应收到事件")
-            .expect("客户端存活")
+        loop {
+            let event = timeout(WAIT, events.recv())
+                .await
+                .expect("2s 内应收到事件")
+                .expect("客户端存活");
+            match event {
+                ClientEvent::SyncBatch(ref batch) if batch.is_empty() => continue,
+                other => return other,
+            }
+        }
     }
 
     /// 主线用例：双客户端互发——B 收到消息、A 收到确认。
