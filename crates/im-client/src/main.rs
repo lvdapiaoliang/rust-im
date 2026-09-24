@@ -1,15 +1,15 @@
-//! # im-client：IM 客户端（阶段 3 最小 CLI 版）
+//! # im-client：IM 客户端（阶段 4 TUI 版）
 //!
 //! 用法：`im-client [server_addr] [user_id] [token]`
 //!
-//! - 输入 `to 内容` 发送消息（如 `2 你好`）；
-//! - 其余行被忽略；Ctrl-C 退出。
+//! ratatui 三栏界面：左会话列表、右上消息区、右下输入框。
+//! 按键见 `tui` 模块文档（Tab 切会话 / `/to <id>` 新会话 /
+//! Enter 发送 / `/quit` 或 Esc 退出）。
 //!
-//! TUI 界面是阶段 4 的话题——本入口只验证「协议全链路跑通」。
+//! CLI 打印版（阶段 3 的过渡形态）已由 TUI 取代——事件流接口
+//! （`ClientEvent`）不变，换的只是「渲染层」。
 
-use bytes::Bytes;
-use im_client::{run_client, ClientConfig, ClientEvent};
-use tokio::sync::mpsc;
+use im_client::{tui, ClientConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,83 +20,10 @@ async fn main() -> anyhow::Result<()> {
 
     let config = ClientConfig {
         // 持久化到工作目录：聊天历史与重发表重启不丢
-        // （临时目录会随系统清理，不适合真实使用）
+        // （临时目录会随系统清理，不适合真实使用；
+        //   同一用户复用同一目录也保证了 client_msg_id 单调不复用）
         data_dir: Some(std::path::PathBuf::from("im-client-data")),
         ..ClientConfig::new(&addr, user_id, &token)
     };
-    println!("im-client: user {user_id} -> {addr}（输入 `to 内容` 发送，Ctrl-C 退出）");
-
-    let (events_tx, mut events_rx) = mpsc::channel(64);
-    let (shutdown_tx, shutdown_rx) = im_transport::shutdown_channel();
-    let handle = run_client(config, events_tx, shutdown_rx).await;
-
-    // 事件打印
-    let printer = tokio::spawn(async move {
-        while let Some(event) = events_rx.recv().await {
-            match event {
-                ClientEvent::Connected { session_id } => {
-                    println!("[已连接 session={session_id}]");
-                }
-                ClientEvent::Disconnected => println!("[连接断开，重连中...]"),
-                ClientEvent::Message(msg) => {
-                    println!("[来自 {}] {}", msg.from, String::from_utf8_lossy(&msg.content));
-                }
-                ClientEvent::MessageQueued {
-                    client_msg_id, to, ..
-                } => {
-                    println!("[发送中 #{client_msg_id} -> {to}]");
-                }
-                ClientEvent::Ack { msg_id, .. } => println!("[已送达 msg_id={msg_id}]"),
-                ClientEvent::SyncBatch(messages) => {
-                    for msg in messages {
-                        println!(
-                            "[离线补投 来自 {}] {}",
-                            msg.from,
-                            String::from_utf8_lossy(&msg.content)
-                        );
-                    }
-                }
-                ClientEvent::Rejected { reason } => {
-                    println!("[登录被拒：{reason}]");
-                    break;
-                }
-                ClientEvent::SendFailed { client_msg_id } => {
-                    println!("[发送失败 client_msg_id={client_msg_id}（重试耗尽）]");
-                }
-            }
-        }
-    });
-
-    // stdin → send_msg；Ctrl-C → 退出。
-    // StdinLock 非 Send，不能跨 await 持有：每行解析后交给独立的发送 task，
-    // 输入循环本身零 await 点，future 才满足 tokio::spawn 的 Send 约束。
-    let stdin = std::io::stdin();
-    let input = tokio::spawn(async move {
-        use std::io::BufRead;
-        for line in stdin.lock().lines() {
-            let Ok(line) = line else { break };
-            let Some((to, content)) = line.split_once(' ') else {
-                continue; // 格式：`to 内容`
-            };
-            let Ok(to) = to.trim().parse::<u64>() else {
-                continue;
-            };
-            if content.is_empty() {
-                continue;
-            }
-            let sender = handle.clone();
-            let content = Bytes::copy_from_slice(content.as_bytes());
-            tokio::spawn(async move {
-                let _ = sender.send_msg(to, content).await;
-            });
-        }
-        shutdown_tx.trigger();
-    });
-
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => println!("\nbye"),
-        _ = printer => {}
-        _ = input => {}
-    }
-    Ok(())
+    tui::run(config).await
 }
