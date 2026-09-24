@@ -424,10 +424,15 @@ async fn dispatch_inbound(
             let allowed =
                 is_group || state.friends.is_friend(user_id, msg.to).await.unwrap_or(false);
             if !allowed {
-                let _ = tx.try_send(Outbound::Text(error_envelope(
-                    "not_friend",
-                    "仅好友之间可以发送消息",
-                )));
+                // 错误载荷带 client_msg_id：前端能把失败精确落到那条乐观消息上
+                // （错误信封不 ack、不入离线——它只关乎这一条发送尝试）
+                let payload = json!({
+                    "code": "not_friend",
+                    "message": "仅好友之间可以发送消息",
+                    "client_msg_id": msg.client_msg_id.to_string(),
+                });
+                let _ =
+                    tx.try_send(Outbound::Text(outbound_envelope(envelope_type::ERROR, env.seq, 0, &payload)));
                 return;
             }
         }
