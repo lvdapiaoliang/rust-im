@@ -13,6 +13,7 @@
 //! | [`crc32`] | CRC-32 查表实现（编译期建表） | 算法图谱 #2（CRC32） |
 //! | [`frame`] | 帧结构 / 命令字 / 编码 | 享元（`Bytes`）、错误即类型 |
 //! | [`codec`] | 增量解码状态机（粘包/半包） | 算法图谱 #3 + enum 状态机模式 |
+//! | [`payload`] | 各命令字的结构化载荷（阶段 3） | varint 实战、游标式解析 |
 //!
 //! # 快速上手
 //!
@@ -36,11 +37,13 @@ pub mod codec;
 pub mod crc32;
 pub mod error;
 pub mod frame;
+pub mod payload;
 pub mod varint;
 
 pub use codec::{FrameDecoder, DEFAULT_MAX_FRAME_LEN};
 pub use error::ProtocolError;
 pub use frame::{Cmd, Frame};
+pub use payload::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
 pub use varint::{decode_u64, encode_i64, encode_u64, zigzag_decode, zigzag_encode};
 
 /// 协议 magic：每帧的固定开头，用于快速识别本协议的流量（类似 PNG 头）。
