@@ -47,6 +47,7 @@
 //! - `docs/05-network-tokio.md`：阶段 2 设计文档（连接层/心跳/优雅关闭）
 //! - `learning-rust-from-scratch/03-tokio/`：select、channel、超时与取消
 
+pub mod backoff;
 pub mod connection;
 pub mod dedup;
 pub mod echo;
@@ -54,6 +55,7 @@ pub mod error;
 pub mod gateway;
 pub mod shutdown;
 
+pub use backoff::Backoff;
 pub use connection::{Connection, ReadHalf, WriteHalf};
 pub use dedup::{DedupWindow, Verdict, WINDOW_SIZE};
 pub use error::TransportError;
