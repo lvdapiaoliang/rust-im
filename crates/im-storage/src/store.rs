@@ -39,7 +39,7 @@ const PREFIX_MESSAGE: &[u8] = b"m/";
 const PREFIX_PENDING: &[u8] = b"p/";
 /// key：离线同步游标。
 const KEY_SYNC_CURSOR: &[u8] = b"c/sync_cursor";
-/// key：client_msg_id 分配计数器。
+/// key：`client_msg_id` 分配计数器。
 const KEY_CLIENT_SEQ: &[u8] = b"c/client_seq";
 
 /// 一条发送中的消息（重发表条目）。
@@ -61,7 +61,7 @@ impl PendingMsg {
         let mut out = Vec::new();
         im_protocol::varint::encode_u64(self.client_msg_id, &mut out);
         im_protocol::varint::encode_u64(self.to, &mut out);
-        im_protocol::varint::encode_u64(self.attempts as u64, &mut out);
+        im_protocol::varint::encode_u64(u64::from(self.attempts), &mut out);
         im_protocol::varint::encode_u64(self.content.len() as u64, &mut out);
         out.extend_from_slice(&self.content);
         out
@@ -239,7 +239,7 @@ impl LocalStore {
         Ok(self
             .engine
             .get(KEY_SYNC_CURSOR)?
-            .map_or(0, decode_u64_value))
+            .map_or(0, |value| decode_u64_value(&value)))
     }
 
     /// 更新同步游标（单调：只增不减）。
@@ -262,7 +262,10 @@ impl LocalStore {
 
     /// 分配并持久化下一个 `client_msg_id`。
     fn next_client_msg_id(&mut self) -> Result<u64, StorageError> {
-        let prev = self.engine.get(KEY_CLIENT_SEQ)?.map_or(0, decode_u64_value);
+        let prev = self
+            .engine
+            .get(KEY_CLIENT_SEQ)?
+            .map_or(0, |value| decode_u64_value(&value));
         let next = prev + 1;
         self.engine.put(KEY_CLIENT_SEQ, &next.to_be_bytes())?;
         Ok(next)
@@ -292,8 +295,8 @@ fn pending_key(client_msg_id: u64) -> Vec<u8> {
 }
 
 /// 存储里的 u64 值（大端定宽 8 字节）。
-fn decode_u64_value(value: Vec<u8>) -> u64 {
-    let bytes: [u8; 8] = value.as_slice().try_into().expect("游标值定宽 8 字节");
+fn decode_u64_value(value: &[u8]) -> u64 {
+    let bytes: [u8; 8] = value.try_into().expect("游标值定宽 8 字节");
     u64::from_be_bytes(bytes)
 }
 
@@ -329,7 +332,7 @@ mod tests {
         }
     }
 
-    /// 收到的消息入库 → 历史按 msg_id 升序、按会话隔离。
+    /// 收到的消息入库 → 历史按 `msg_id` 升序、按会话隔离。
     #[test]
     fn incoming_history_is_per_peer_and_ordered() {
         let dir = TempDir::new();
@@ -391,7 +394,7 @@ mod tests {
         assert_eq!(history[0].content, Bytes::from_static(b"hello"));
     }
 
-    /// 重启恢复：pending、游标、client_seq 全部持久化。
+    /// 重启恢复：`pending`、游标、`client_seq` 全部持久化。
     #[test]
     fn reopen_restores_pending_cursor_and_seq() {
         let dir = TempDir::new();
@@ -411,7 +414,7 @@ mod tests {
         assert_eq!(next, 2);
     }
 
-    /// 重试计数持久化；核销后再 set_attempts 是无害的 no-op。
+    /// 重试计数持久化；核销后再 `set_attempts` 是无害的 no-op。
     #[test]
     fn attempts_persist_and_noop_after_ack() {
         let dir = TempDir::new();
