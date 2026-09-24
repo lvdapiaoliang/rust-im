@@ -33,7 +33,7 @@ use super::groups::{GroupError, GroupStore};
 pub const TOKEN_TTL: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
 
 /// 应用状态：axum 的依赖注入容器（`Clone` 廉价——全是 `Arc`/池句柄）。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppState {
     /// 会话中心：雪花发号 + （WS 网关复用的）路由表。
     pub sessions: Sessions,
@@ -211,7 +211,7 @@ pub struct LoginReq {
 }
 
 /// 登录响应。
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct LoginResp {
     /// 不透明令牌（后续 REST 与 WS 都用它）。
     pub token: String,
@@ -428,7 +428,7 @@ async fn upload_file(
     auth: AuthUser,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<FileMeta>), ApiError> {
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::bad_request(format!("multipart 解析失败: {e}")))?

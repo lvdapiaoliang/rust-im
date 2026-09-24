@@ -41,7 +41,7 @@ pub enum AccountError {
 }
 
 /// 用户实体（不含敏感字段——密码哈希留在仓储内部）。
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct User {
     /// 用户 ID（雪花，即协议层 `user_id`）。
     pub id: u64,
