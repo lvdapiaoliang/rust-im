@@ -13,13 +13,18 @@
 //!
 //! 分层纪律（与 TCP 路径对齐）：
 //! - [`db`]：连接池与迁移——唯一的 sqlx 连接入口；
-//! - [`account`]：账号域仓储（用户/令牌）——业务语义在这里，
-//!   HTTP 处理器只做参数解析与响应组装；
-//! - WS 网关与 REST 路由在后续子模块落地（`api` / `ws`）。
+//! - [`account`] / [`friends`] / [`groups`] / [`files`]：各域仓储——
+//!   业务语义（状态机、事务、安全取舍）收敛在这里；
+//! - [`api`]：REST 路由与处理器——只做解析/组装/错误映射，不写 SQL；
+//! - WS 网关（JSON 信封 ↔ `Frame` 翻译）在后续子模块落地。
 //!
 //! 与 TCP/TUI 客户端的关系：**双接入并存**。TCP 路径的二进制协议与
 //! [`crate::session`] 逻辑一行不改；WS 路径把 JSON 信封翻译成
 //! `Frame` 后复用同一套会话核心（见 [`crate::sink::FrameSink`]）。
 
 pub mod account;
+pub mod api;
 pub mod db;
+pub mod files;
+pub mod friends;
+pub mod groups;

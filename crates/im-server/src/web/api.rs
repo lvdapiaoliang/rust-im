@@ -506,11 +506,6 @@ fn url_friendly(name: &str) -> String {
     out
 }
 
-// BodyExt 在处理器里并未直接用到，但下面的测试用 to_bytes；
-// 这里显式引入避免「仅测试使用」的 import 警告依赖 cfg 结构。
-#[allow(unused_imports)]
-use BodyExt as _;
-
 #[cfg(test)]
 mod tests {
     use super::*;
