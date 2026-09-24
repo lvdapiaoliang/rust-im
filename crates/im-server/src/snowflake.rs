@@ -21,7 +21,7 @@
 //!
 //! 1. 回拨量 ≤ [`MAX_BACKWARD_MS`]（容忍 NTP 微调）：错误值携带回拨量，
 //!    调用方可稍候重试（等待真实时间追平）；
-//! 2. 回拨量更大：同样报错但需运维介入（换 machine_id 或等时钟稳定）。
+//! 2. 回拨量更大：同样报错但需运维介入（换 `machine_id` 或等时钟稳定）。
 //!    阈值本身由调用方把握——生成器只负责「拒绝 + 报告回拨量」。
 //!
 //! # 测试策略：注入时钟
@@ -102,18 +102,20 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_ms(&self) -> u64 {
+        // map_or：时钟早于 1970（理论不可能）归 0；u128→u64 在毫秒
+        // 精度下要到公元 5849 亿年才会溢出，饱和处理即可
         let unix_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
         unix_ms.saturating_sub(EPOCH_MS)
     }
 }
 
-/// 手动时钟（测试用）：`Cell` 单线程拨针，测试跑在单线程里足够。
+/// 手动时钟（测试用）：`AtomicU64` 拨针——单线程测试足够用，
+/// 同时满足 `Sync`（可被 `Arc` 跨线程共享，与生产时钟同构）。
 #[derive(Debug)]
 pub struct ManualClock {
-    now: std::cell::Cell<u64>,
+    now: std::sync::atomic::AtomicU64,
 }
 
 impl ManualClock {
@@ -121,24 +123,25 @@ impl ManualClock {
     #[must_use]
     pub fn new(ms: u64) -> Self {
         Self {
-            now: std::cell::Cell::new(ms),
+            now: std::sync::atomic::AtomicU64::new(ms),
         }
     }
 
     /// 拨到 `ms`（可以往回拨——正好用来测回拨分支）。
     pub fn set(&self, ms: u64) {
-        self.now.set(ms);
+        self.now.store(ms, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 前进 `ms` 毫秒。
     pub fn advance(&self, ms: u64) {
-        self.now.set(self.now.get() + ms);
+        self.now
+            .fetch_add(ms, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
 impl Clock for ManualClock {
     fn now_ms(&self) -> u64 {
-        self.now.get()
+        self.now.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -237,7 +240,7 @@ pub const fn assemble(timestamp: u64, machine_id: u64, sequence: u64) -> u64 {
         | sequence
 }
 
-/// 位段解析：ID → (timestamp, machine_id, sequence)。
+/// 位段解析：ID → (timestamp, `machine_id`, sequence)。
 ///
 /// 与 [`assemble`] 互逆；运维排查「这个 ID 哪台机器何时发的」全靠它。
 #[must_use]
@@ -346,8 +349,8 @@ mod tests {
         );
     }
 
-    /// 并发唯一性：8 线程各持独立生成器（不同 machine_id）× 10000 个 ID 无一重复。
-    /// 雪花的部署约定：一个 machine_id 只属于一个进程/线程组。
+    /// 并发唯一性：8 线程各持独立生成器（不同 `machine_id`）× 10000 个 ID 无一重复。
+    /// 雪花的部署约定：一个 `machine_id` 只属于一个进程/线程组。
     #[test]
     fn concurrent_generators_produce_unique_ids() {
         use std::collections::HashSet;
@@ -356,7 +359,7 @@ mod tests {
         const THREADS: u64 = 8;
         const PER_THREAD: usize = 10_000;
 
-        let mut all_ids = Vec::with_capacity(THREADS as usize * PER_THREAD);
+        let mut all_ids = Vec::with_capacity(usize::try_from(THREADS).unwrap() * PER_THREAD);
         let mut handles = Vec::new();
         for t in 0..THREADS {
             handles.push(std::thread::spawn(move || {

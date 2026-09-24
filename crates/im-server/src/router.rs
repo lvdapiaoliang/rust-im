@@ -2,7 +2,7 @@
 //!
 //! # 解决什么问题
 //!
-//! 网关要维护「user_id → 连接句柄」的全局映射，被所有连接 task 并发读写。
+//! 网关要维护「`user_id` → 连接句柄」的全局映射，被所有连接 task 并发读写。
 //! 朴素方案 `RwLock<HashMap>`：**一把锁罩住全表**——百万连接下，
 //! 每条消息的路由查询都要排队，锁成为吞吐上限。
 //!
@@ -33,7 +33,7 @@
 
 use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::{Arc, Mutex};
 
 /// 路由表错误。
 #[derive(Debug, thiserror::Error)]
@@ -59,10 +59,10 @@ pub enum RouterError {
 ///
 /// let router = Router::new(16);
 /// router.register(42, "conn-a".to_string()).unwrap();
-/// assert_eq!(router.get(&42), Some("conn-a".to_string()));
+/// assert_eq!(router.get(42), Some("conn-a".to_string()));
 ///
 /// router.unregister(42, &"conn-a".to_string());
-/// assert_eq!(router.get(&42), None);
+/// assert_eq!(router.get(42), None);
 /// ```
 pub struct Router<V> {
     /// 分片数组：固定长度，每片一把锁。
@@ -91,10 +91,13 @@ impl<V: Clone> Router<V> {
     }
 
     /// key → 分片下标：高位哈希 + 位与取模。
-    fn shard_index(&self, key: &u64) -> usize {
+    ///
+    /// （截断 allow：32 位目标上 usize 截断哈希高位也无碍——
+    /// 掩码只取低位，均匀性不受影响。）
+    #[allow(clippy::cast_possible_truncation)]
+    fn shard_index(&self, key: u64) -> usize {
         // hash_one：把 u64 哈希成 u64（SipHash 1-3，抗碰撞）
         let hash = self.hasher.hash_one(key);
-        // usize 可能是 32 位：先转 u64 再截断，避免高位丢失不均匀
         (hash as usize) & (self.shards.len() - 1)
     }
 
@@ -103,8 +106,12 @@ impl<V: Clone> Router<V> {
     /// # Errors
     ///
     /// 该 `user_id` 已注册时返回 [`RouterError::AlreadyOnline`]。
+    ///
+    /// # Panics
+    ///
+    /// 分片锁中毒（持锁线程 panic）时 panic。
     pub fn register(&self, user_id: u64, value: V) -> Result<(), RouterError> {
-        let shard = &self.shards[self.shard_index(&user_id)];
+        let shard = &self.shards[self.shard_index(user_id)];
         let mut guard = shard.lock().expect("路由表锁中毒");
         if guard.contains_key(&user_id) {
             return Err(RouterError::AlreadyOnline { user_id });
@@ -117,11 +124,15 @@ impl<V: Clone> Router<V> {
     /// 防止旧连接的收尾逻辑误删新连接的路由（重连竞态的经典坑）。
     ///
     /// 返回是否真的移除（`false` = key 不存在或值不匹配）。
+    ///
+    /// # Panics
+    ///
+    /// 分片锁中毒（持锁线程 panic）时 panic。
     pub fn unregister(&self, user_id: u64, expect: &V) -> bool
     where
         V: PartialEq,
     {
-        let shard = &self.shards[self.shard_index(&user_id)];
+        let shard = &self.shards[self.shard_index(user_id)];
         let mut guard = shard.lock().expect("路由表锁中毒");
         match guard.get(&user_id) {
             Some(current) if current == expect => {
@@ -137,14 +148,22 @@ impl<V: Clone> Router<V> {
     /// 为什么不返回引用？锁的守卫不能交出临界区（否则调用方握着锁
     /// 干别的事，分片白分了）——**克隆句柄、立刻放锁**是标准姿势；
     /// `ConnectionHandle` 的克隆只是 channel sender 的引用计数 +1。
+    ///
+    /// # Panics
+    ///
+    /// 分片锁中毒（持锁线程 panic）时 panic。
     #[must_use]
-    pub fn get(&self, user_id: &u64) -> Option<V> {
+    pub fn get(&self, user_id: u64) -> Option<V> {
         let shard = &self.shards[self.shard_index(user_id)];
         let guard = shard.lock().expect("路由表锁中毒");
-        guard.get(user_id).cloned()
+        guard.get(&user_id).cloned()
     }
 
     /// 当前在线总数（诊断指标：遍历各片求和，每片瞬时加锁）。
+    ///
+    /// # Panics
+    ///
+    /// 任一分片锁中毒时 panic。
     #[must_use]
     pub fn len(&self) -> usize {
         self.shards
@@ -186,6 +205,7 @@ pub type SharedRouter<V> = Arc<Router<V>>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::TryLockError;
     use std::sync::Arc;
 
     /// 基本 CRUD + 重复注册拒绝
@@ -193,7 +213,7 @@ mod tests {
     fn register_get_unregister() {
         let r = Router::new(8);
         r.register(1, "a".to_string()).unwrap();
-        assert_eq!(r.get(&1), Some("a".to_string()));
+        assert_eq!(r.get(1), Some("a".to_string()));
 
         // 重复注册被拒
         assert!(matches!(
@@ -201,10 +221,10 @@ mod tests {
             Err(RouterError::AlreadyOnline { user_id: 1 })
         ));
         // 注册失败不覆盖旧值
-        assert_eq!(r.get(&1), Some("a".to_string()));
+        assert_eq!(r.get(1), Some("a".to_string()));
 
         assert!(r.unregister(1, &"a".to_string()));
-        assert_eq!(r.get(&1), None);
+        assert_eq!(r.get(1), None);
         assert!(r.is_empty());
     }
 
@@ -216,7 +236,7 @@ mod tests {
         // 旧连接拿 "old"，但表里已被新连接 "new" 顶替（假设某种路径）
         // 简化测试：值不匹配 → 不移除
         assert!(!r.unregister(7, &"wrong".to_string()));
-        assert_eq!(r.get(&7), Some("old".to_string()));
+        assert_eq!(r.get(7), Some("old".to_string()));
         assert!(!r.unregister(999, &"old".to_string()));
     }
 
@@ -258,7 +278,7 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
-        assert_eq!(router.len(), (THREADS * KEYS_PER_THREAD) as usize);
+        assert_eq!(router.len(), usize::try_from(THREADS * KEYS_PER_THREAD).unwrap());
 
         // 2. 并发查询
         let mut handles = Vec::new();
@@ -267,7 +287,7 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 for i in 0..KEYS_PER_THREAD {
                     let key = t * KEYS_PER_THREAD + i;
-                    assert_eq!(r.get(&key), Some(format!("v{key}")), "key={key}");
+                    assert_eq!(r.get(key), Some(format!("v{key}")), "key={key}");
                 }
             }));
         }
@@ -299,7 +319,7 @@ mod tests {
         let r = Router::new(8);
         r.register(42, "hello".to_string()).unwrap();
         let r2 = r.clone();
-        assert_eq!(r2.get(&42), Some("hello".to_string()));
+        assert_eq!(r2.get(42), Some("hello".to_string()));
     }
 
     /// 分片数自动取 2 的幂：new(3) 实际 4 片、new(100) 实际 128 片
@@ -311,7 +331,7 @@ mod tests {
         assert_eq!(Router::<()>::new(0).shards.len(), 1, "0 归一");
     }
 
-    /// TryLock 语义冒烟：锁不可重入，但释放后立即可再取
+    /// `TryLock` 语义冒烟：锁不可重入，但释放后立即可再取
     /// （防呆测试：确认我们没在 guard 存活期间递归加锁同一分片）
     #[test]
     fn locks_are_reentrant_free() {
