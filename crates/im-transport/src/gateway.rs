@@ -400,7 +400,12 @@ mod tests {
             .expect("网关存活");
         assert_eq!(event.frame.cmd, Cmd::Msg);
         assert_eq!(event.frame.payload, Bytes::from_static(b"hello gateway"));
-        assert_eq!(event.peer, Some(addr));
+        // peer 是客户端的源地址（含随机端口），只能断言 IP 维度
+        let peer_ip = event
+            .peer
+            .expect("应携带对端地址")
+            .ip();
+        assert!(peer_ip.is_loopback());
 
         // 业务层回话
         event
@@ -501,9 +506,8 @@ mod tests {
         let frame = timeout(Duration::from_secs(2), client.read_frame())
             .await
             .expect("2s 内应看到服务端关闭")
-            .expect("连接正常")
-            .expect("应收到 EOF 而非帧");
-        drop(frame);
+            .expect("连接正常");
+        assert!(frame.is_none(), "应收到 EOF 而非帧");
 
         // 必须等满了 idle_timeout 才断（不是秒断——秒断说明超时逻辑错了）
         assert!(
