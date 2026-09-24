@@ -322,3 +322,270 @@ impl Sessions {
         out
     }
 }
+
+// ────────────────────────────────────────────────────────────────
+// 每连接会话 task
+// ────────────────────────────────────────────────────────────────
+
+/// 一条连接上的会话状态（会话 task 独占，零共享）。
+struct SessionState {
+    /// 认证通过的用户 ID（`None` = 未登录）。
+    user: Option<u64>,
+    /// 服务端下行帧序号（下一个待用值 + 1，从 1 开始）。
+    send_seq: u64,
+    /// 上行业务帧 seq 去重窗口。
+    ///
+    /// 懒初始化：以客户端首帧的 seq 为基准——不依赖「客户端 seq 从 1
+    /// 开始」的约定，乱序起点也能对齐（`Option` 状态机的小实战）。
+    dedup: Option<DedupWindow>,
+}
+
+impl SessionState {
+    fn new() -> Self {
+        Self {
+            user: None,
+            send_seq: 0,
+            dedup: None,
+        }
+    }
+
+    /// 喂入一帧的 seq，返回去重判定。
+    fn feed_seq(&mut self, seq: u64) -> Verdict {
+        if let Some(window) = self.dedup.as_mut() {
+            return window.feed(seq);
+        }
+        // 首帧：以它为基准建窗，然后喂入（必为 InOrder）
+        let mut window = DedupWindow::new(seq);
+        let verdict = window.feed(seq);
+        self.dedup = Some(window);
+        verdict
+    }
+
+    /// 帧级累计确认：「ack 之前的 seq 我已收齐」。
+    fn ack(&self) -> u64 {
+        self.dedup.as_ref().map_or(0, DedupWindow::ack)
+    }
+}
+
+/// 回一帧载荷：分配下行 seq，填帧级累计确认，送出。
+async fn reply<T: Payload>(
+    state: &mut SessionState,
+    handle: &ConnectionHandle,
+    payload: &T,
+) -> Result<(), TransportError> {
+    state.send_seq += 1;
+    handle.send(payload.encode_frame(state.send_seq, state.ack())).await
+}
+
+/// 单条连接的会话 task：认证、路由、同步，以及连接死亡后的收尾。
+///
+/// 本函数是**会话生命周期**的唯一属主（网关是连接生命周期的属主）：
+/// 它返回即会话终结、路由注销完成。
+///
+/// 优雅关闭的链式传导：会话 task 退出 → 本地 `frame_rx` drop →
+/// 网关读循环的 `inbound.send` 失败 → 网关回收连接 → TCP 关闭。
+/// 不需要显式「关连接」的信号——**通道的 drop 就是信号**。
+///
+/// # Errors
+///
+/// 返回网关的结束原因（连接为何终结）；会话层自身没有 IO 失败路径。
+pub async fn serve_connection(
+    sessions: &Sessions,
+    conn_id: u64,
+    stream: TcpStream,
+    gateway_config: GatewayConfig,
+    shutdown: ShutdownRx,
+) -> Result<(), TransportError> {
+    // 网关 → 会话 task 的本地通道（与外界无涉，容量即反压点）
+    let (frame_tx, mut frame_rx) = mpsc::channel::<InboundFrame>(SESSION_CHANNEL_CAPACITY);
+    let gateway =
+        tokio::spawn(run_gateway_connection(stream, gateway_config, frame_tx, shutdown));
+
+    let mut state = SessionState::new();
+
+    // 业务帧循环：网关退出（连接死亡/关停）时 frame_rx 结束
+    while let Some(event) = frame_rx.recv().await {
+        // seq 去重：应用层重发/乱序在进入业务前就被挡下
+        match state.feed_seq(event.frame.seq) {
+            Verdict::Duplicate | Verdict::TooFar { .. } => continue, // 丢弃
+            Verdict::InOrder | Verdict::OutOfOrder => {}               // 上递
+        }
+        handle_frame(sessions, &mut state, event).await;
+    }
+
+    // ── 收尾：注销路由（带 conn_id 谓词校验，见 Sessions::unregister）
+    if let Some(user_id) = state.user {
+        sessions.unregister(user_id, conn_id);
+    }
+
+    // 连接生命周期的权威结论来自网关
+    gateway
+        .await
+        .expect("网关 task 不应 panic")
+}
+
+/// 业务帧分发：握手 / 消息 / 同步三正餐，其余忽略。
+///
+/// 解码失败的帧**丢弃而非断连**：坏载荷无法威胁会话状态
+/// （状态机不推进），恶意流充其量浪费一点 CPU——这是「容忍与隔离」
+/// 对「严格断连」的取舍，阶段 7 引入限流后再收紧。
+async fn handle_frame(sessions: &Sessions, state: &mut SessionState, event: InboundFrame) {
+    let frame = event.frame;
+    let handle = &event.handle;
+
+    match frame.cmd {
+        im_protocol::Cmd::Handshake => handle_handshake(sessions, state, handle, &frame).await,
+        im_protocol::Cmd::Msg => handle_msg(sessions, state, handle, &frame).await,
+        im_protocol::Cmd::SyncReq => handle_sync(sessions, state, handle, &frame).await,
+        // Ping/Pong 由网关消化或心跳产生；未知命令字进不到这里
+        // （解码层已拦截 `UnknownCommand`）
+        _ => {}
+    }
+}
+
+/// 握手：认证 → 注册路由 → 回 `HandshakeAck`。
+async fn handle_handshake(
+    sessions: &Sessions,
+    state: &mut SessionState,
+    handle: &ConnectionHandle,
+    frame: &im_protocol::Frame,
+) {
+    let Ok(hs) = Handshake::decode_frame(frame) else {
+        return; // 坏载荷：丢弃
+    };
+
+    // 重复握手：同一连接不允许二次登录（要换账号请重连）
+    if state.user.is_some() {
+        let ack = HandshakeAck::rejected("already authenticated");
+        let _ = reply(state, handle, &ack).await;
+        return;
+    }
+
+    let authenticator = sessions.config().authenticator.as_ref();
+    if !authenticator.authenticate(hs.user_id, &hs.token) {
+        let ack = HandshakeAck::rejected("bad credentials");
+        let _ = reply(state, handle, &ack).await;
+        return;
+    }
+
+    // 会话 ID 也由雪花分配（与 msg_id 同源，全局唯一）
+    let Some(session_id) = sessions.next_id().await else {
+        let ack = HandshakeAck::rejected("id generator unavailable");
+        let _ = reply(state, handle, &ack).await;
+        return;
+    };
+
+    let ack = match sessions.register(hs.user_id, frame.seq, handle.clone()) {
+        Err(_) => HandshakeAck::rejected("already online"), // 单端登录：顶不掉旧连接
+        Ok(()) => {
+            state.user = Some(hs.user_id);
+            HandshakeAck::accepted(session_id)
+        }
+    };
+    let _ = reply(state, handle, &ack).await;
+}
+
+/// 上行消息：覆盖发送者身份 → 分配全局 ID → 路由/离线 → 回 `MsgAck`。
+async fn handle_msg(
+    sessions: &Sessions,
+    state: &mut SessionState,
+    handle: &ConnectionHandle,
+    frame: &im_protocol::Frame,
+) {
+    // 未登录先说话：丢弃（不回执，客户端超时重发后自然回到正轨）
+    let Some(from) = state.user else {
+        return;
+    };
+    let Ok(upstream) = Msg::decode_frame(frame) else {
+        return;
+    };
+
+    // 发号失败（时钟回拨）：丢弃整条消息，靠客户端超时重发补投
+    let Some(msg_id) = sessions.next_id().await else {
+        return;
+    };
+
+    // from 由服务端裁决（客户端伪造无效）；content 的 `Bytes`
+    // 零拷贝传递给转发路径
+    let outgoing = Msg {
+        from,
+        to: upstream.to,
+        msg_id,
+        content: upstream.content,
+    };
+    sessions.deliver(&outgoing).await;
+
+    // 消息级确认：告诉发送方全局 msg_id（本地排序/去重/同步游标都用它）
+    let ack = MsgAck { msg_id };
+    let _ = reply(state, handle, &ack).await;
+}
+
+/// 离线同步：按游标拉取一批，空批 = 「没有更多」。
+async fn handle_sync(
+    sessions: &Sessions,
+    state: &mut SessionState,
+    handle: &ConnectionHandle,
+    frame: &im_protocol::Frame,
+) {
+    let Some(user_id) = state.user else {
+        return; // 未登录：同步无意义
+    };
+    let Ok(req) = SyncReq::decode_frame(frame) else {
+        return;
+    };
+
+    let batch = sessions.config().sync_batch_size;
+    let messages = sessions.sync_since(user_id, req.since, batch);
+    let resp = SyncResp { messages };
+    let _ = reply(state, handle, &resp).await;
+}
+
+// ────────────────────────────────────────────────────────────────
+// 接入：accept 循环
+// ────────────────────────────────────────────────────────────────
+
+/// accept 循环：每条新连接分配 `conn_id` 并 spawn 会话 task。
+///
+/// # Errors
+///
+/// accept 发生 IO 故障时返回 [`TransportError::Io`]；收到关停信号返回 `Ok(())`。
+pub async fn serve(
+    listener: TcpListener,
+    sessions: Sessions,
+    shutdown: ShutdownRx,
+) -> Result<(), TransportError> {
+    let mut accept_shutdown = shutdown.clone();
+    loop {
+        tokio::select! {
+            () = accept_shutdown.wait() => return Ok(()),
+            accepted = listener.accept() => {
+                let Ok((stream, _peer)) = accepted else { continue };
+                let sessions = sessions.clone();
+                let shutdown = shutdown.clone();
+                let conn_id = sessions.next_conn_id();
+                tokio::spawn(async move {
+                    // 返回值只用于诊断：连接的失败原因已在网关层处理
+                    let _ =
+                        serve_connection(&sessions, conn_id, stream, GatewayConfig::default(), shutdown)
+                            .await;
+                });
+            }
+        }
+    }
+}
+
+/// 测试/嵌入脚手架：在随机端口起一个完整服务，返回地址与句柄。
+///
+/// # Errors
+///
+/// 端口绑定失败时返回 [`TransportError::Io`]。
+pub async fn spawn_server(
+    config: SessionConfig,
+) -> Result<(SocketAddr, Sessions, ShutdownTx), TransportError> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let sessions = Sessions::new(config);
+    let (shutdown_tx, shutdown_rx) = shutdown_channel();
+    tokio::spawn(serve(listener, sessions.clone(), shutdown_rx));
+    Ok((addr, sessions, shutdown_tx))
+}
