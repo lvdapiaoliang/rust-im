@@ -209,6 +209,10 @@ impl Sessions {
     ///
     /// 时钟回拨不可恢复（拒绝发号），返回 `None`——调用方应放弃本次
     /// 操作并让客户端超时重试。
+    ///
+    /// # Panics
+    ///
+    /// 雪花锁中毒时 panic（锁中毒属实现 bug，应立即暴露）。
     pub async fn next_id(&self) -> Option<u64> {
         for _ in 0..ID_RETRY_ATTEMPTS {
             // guard 在块内结束：sleep 跨 await 时不持锁
