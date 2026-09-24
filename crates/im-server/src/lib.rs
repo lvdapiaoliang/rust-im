@@ -10,7 +10,12 @@
 //! 学习文档：`docs/06-server-arch.md`
 
 pub mod router;
+pub mod session;
 pub mod snowflake;
 
 pub use router::{Router, RouterError};
+pub use session::{
+    serve, serve_connection, spawn_server, AllowAll, Authenticator, SessionConfig, SessionHandle,
+    Sessions, StaticToken, DEFAULT_MAX_OFFLINE_PER_USER, DEFAULT_SYNC_BATCH,
+};
 pub use snowflake::{Snowflake, SnowflakeError, SystemClock};

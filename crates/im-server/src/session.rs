@@ -598,3 +598,322 @@ pub async fn spawn_server(
     tokio::spawn(serve(listener, sessions.clone(), shutdown_rx));
     Ok((addr, sessions, shutdown_tx))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use im_protocol::Frame;
+    use im_transport::Connection;
+    use tokio::time::timeout;
+
+    /// 测试统一的等待上限：本地回环上任何正常交互都应远快于此。
+    const WAIT: Duration = Duration::from_secs(2);
+
+    /// 测试配置：口令 "t"，其余默认。
+    fn test_config() -> SessionConfig {
+        SessionConfig {
+            authenticator: Arc::new(StaticToken { token: "t".to_string() }),
+            ..SessionConfig::default()
+        }
+    }
+
+    /// 起服务（随机端口）。
+    async fn server() -> (SocketAddr, Sessions, ShutdownTx) {
+        spawn_server(test_config()).await.expect("服务应能启动")
+    }
+
+    /// 测试客户端：裸 `Connection` + 每帧递增的 seq（与服务端约定的协议用法）。
+    struct TestClient {
+        conn: Connection,
+        seq: u64,
+    }
+
+    impl TestClient {
+        async fn connect(addr: SocketAddr) -> Self {
+            Self {
+                conn: Connection::connect(&addr.to_string()).await.unwrap(),
+                seq: 0,
+            }
+        }
+
+        fn next_seq(&mut self) -> u64 {
+            self.seq += 1;
+            self.seq
+        }
+
+        async fn send(&mut self, frame: &Frame) {
+            self.conn.write_frame(frame).await.unwrap();
+        }
+
+        /// 收一帧并按载荷类型解码。
+        async fn recv<T: Payload>(&mut self) -> T {
+            let frame = timeout(WAIT, self.conn.read_frame())
+                .await
+                .expect("2s 内应收到帧")
+                .expect("连接正常")
+                .expect("连接未关闭");
+            T::decode_frame(&frame).expect("载荷应与命令字匹配")
+        }
+
+        /// 握手并返回应答。
+        async fn handshake(&mut self, user_id: u64, token: &str) -> HandshakeAck {
+            let hs = Handshake {
+                user_id,
+                token: token.to_string(),
+            };
+            let frame = hs.encode_frame(self.next_seq(), 0);
+            self.send(&frame).await;
+            self.recv().await
+        }
+
+        /// 发一条上行消息（from/msg_id 留给服务端裁决）。
+        async fn send_msg(&mut self, to: u64, content: &[u8]) {
+            let msg = Msg {
+                from: 0,
+                to,
+                msg_id: 0,
+                content: Bytes::copy_from_slice(content),
+            };
+            let frame = msg.encode_frame(self.next_seq(), 0);
+            self.send(&frame).await;
+        }
+
+        /// 发起离线同步。
+        async fn sync(&mut self, since: u64) -> SyncResp {
+            let req = SyncReq { since };
+            let frame = req.encode_frame(self.next_seq(), 0);
+            self.send(&frame).await;
+            self.recv().await
+        }
+
+        /// 断言一小段时间内没有任何帧到达。
+        async fn expect_silence(&mut self) {
+            assert!(
+                timeout(Duration::from_millis(300), self.conn.read_frame())
+                    .await
+                    .is_err(),
+                "不应有任何回帧"
+            );
+        }
+    }
+
+    /// 握手成功：session_id 是雪花 ID（非零），路由表 +1。
+    #[tokio::test]
+    async fn handshake_accepts_and_assigns_session_id() {
+        let (addr, sessions, _shutdown) = server().await;
+        let mut alice = TestClient::connect(addr).await;
+
+        let ack = alice.handshake(1, "t").await;
+        assert!(ack.is_accepted());
+        assert_ne!(ack.session_id, 0, "session_id 应由雪花分配");
+        assert_eq!(sessions.online_count(), 1);
+    }
+
+    /// 错误口令：拒绝且说明原因（不区分「用户不存在/密码错」，防账号探测）。
+    #[tokio::test]
+    async fn handshake_rejects_bad_token() {
+        let (addr, sessions, _shutdown) = server().await;
+        let mut alice = TestClient::connect(addr).await;
+
+        let ack = alice.handshake(1, "wrong").await;
+        assert!(!ack.is_accepted());
+        assert!(
+            ack.reason.contains("credentials"),
+            "原因应可读: {}",
+            ack.reason
+        );
+        assert_eq!(sessions.online_count(), 0, "拒绝登录不占路由");
+    }
+
+    /// 单端登录：同账号第二个连接被拒，旧连接不受影响。
+    #[tokio::test]
+    async fn duplicate_login_is_rejected() {
+        let (addr, sessions, _shutdown) = server().await;
+        let mut first = TestClient::connect(addr).await;
+        let mut second = TestClient::connect(addr).await;
+
+        assert!(first.handshake(7, "t").await.is_accepted());
+        let ack = second.handshake(7, "t").await;
+        assert!(!ack.is_accepted());
+        assert!(
+            ack.reason.contains("already online"),
+            "原因应可读: {}",
+            ack.reason
+        );
+        assert_eq!(sessions.online_count(), 1, "只有旧连接在线");
+    }
+
+    /// 主线用例：两个在线用户互发——Bob 收到被改写 sender 的下行消息，
+    /// Alice 收到携带同一 msg_id 的确认。
+    #[tokio::test]
+    async fn msg_routes_between_online_users() {
+        let (addr, _sessions, _shutdown) = server().await;
+        let mut alice = TestClient::connect(addr).await;
+        let mut bob = TestClient::connect(addr).await;
+        assert!(alice.handshake(1, "t").await.is_accepted());
+        assert!(bob.handshake(2, "t").await.is_accepted());
+
+        alice.send_msg(2, b"hi bob").await;
+
+        // Bob 视角：from 被服务端裁决为 1（客户端伪造无效），msg_id 已分配
+        let msg: Msg = bob.recv().await;
+        assert_eq!(msg.from, 1);
+        assert_eq!(msg.to, 2);
+        assert_eq!(msg.content, Bytes::from_static(b"hi bob"));
+        assert_ne!(msg.msg_id, 0);
+
+        // Alice 视角：消息级确认与 Bob 收到的 msg_id 一致
+        let ack: MsgAck = alice.recv().await;
+        assert_eq!(ack.msg_id, msg.msg_id);
+    }
+
+    /// 离线暂存 + 登录同步：Bob 不在线时消息入队，
+    /// Bob 上线后 SyncReq(since=0) 一次拉走；再拉为空。
+    #[tokio::test]
+    async fn msg_to_offline_user_is_queued_then_synced() {
+        let (addr, sessions, _shutdown) = server().await;
+        let mut alice = TestClient::connect(addr).await;
+        assert!(alice.handshake(1, "t").await.is_accepted());
+
+        alice.send_msg(2, b"offline-hello").await;
+        let ack: MsgAck = alice.recv().await; // 等服务端处理完
+        assert_eq!(sessions.offline_count(2), 1);
+
+        let mut bob = TestClient::connect(addr).await;
+        assert!(bob.handshake(2, "t").await.is_accepted());
+        let resp = bob.sync(0).await;
+        assert_eq!(resp.messages.len(), 1);
+        assert_eq!(
+            resp.messages[0].content,
+            Bytes::from_static(b"offline-hello")
+        );
+        assert_eq!(resp.messages[0].from, 1);
+        assert_eq!(resp.messages[0].msg_id, ack.msg_id, "离线的 msg_id 与 Ack 一致");
+
+        // 已取走：再拉为空（「没有更多」）
+        let again = bob.sync(0).await;
+        assert!(again.messages.is_empty());
+    }
+
+    /// 同 seq 重发：去重窗口丢弃第二份，接收方只看到一条。
+    #[tokio::test]
+    async fn duplicate_upstream_seq_is_dropped() {
+        let (addr, _sessions, _shutdown) = server().await;
+        let mut alice = TestClient::connect(addr).await;
+        let mut bob = TestClient::connect(addr).await;
+        assert!(alice.handshake(1, "t").await.is_accepted());
+        assert!(bob.handshake(2, "t").await.is_accepted());
+
+        // 同一帧字节原样发两次（应用层重发的最真实形态）
+        let msg = Msg {
+            from: 0,
+            to: 2,
+            msg_id: 0,
+            content: Bytes::from_static(b"dup"),
+        };
+        let frame = msg.encode_frame(2, 0); // handshake 用了 seq=1，此处 seq=2
+        alice.send(&frame).await;
+        alice.send(&frame).await;
+
+        let received: Msg = bob.recv().await;
+        let ack: MsgAck = alice.recv().await;
+        assert_eq!(received.msg_id, ack.msg_id);
+
+        // 第二份被去重：双端都不再有新帧
+        alice.expect_silence().await;
+        bob.expect_silence().await;
+    }
+
+    /// 未登录先发消息：无任何回执（丢弃，不进路由也不入离线）。
+    #[tokio::test]
+    async fn unauthenticated_msg_gets_no_ack() {
+        let (addr, sessions, _shutdown) = server().await;
+        let mut intruder = TestClient::connect(addr).await;
+
+        intruder.send_msg(2, b"spoof").await;
+        intruder.expect_silence().await;
+        assert_eq!(sessions.offline_count(2), 0, "未认证消息不入离线队列");
+    }
+
+    /// 离线队列有界：超限丢最老的，登录后只能同步到最新 N 条。
+    #[tokio::test]
+    async fn offline_queue_is_bounded() {
+        let config = SessionConfig {
+            max_offline_per_user: 3,
+            ..test_config()
+        };
+        let (addr, _sessions, _shutdown) =
+            spawn_server(config).await.expect("服务应能启动");
+
+        let mut alice = TestClient::connect(addr).await;
+        assert!(alice.handshake(1, "t").await.is_accepted());
+
+        for i in 0..5 {
+            alice.send_msg(2, format!("m{i}").as_bytes()).await;
+        }
+        for _ in 0..5 {
+            let _: MsgAck = alice.recv().await; // 消化完 5 个确认
+        }
+
+        let mut bob = TestClient::connect(addr).await;
+        assert!(bob.handshake(2, "t").await.is_accepted());
+        let resp = bob.sync(0).await;
+        assert_eq!(resp.messages.len(), 3, "只保留最新 3 条");
+        // 丢最老：内容是 m2、m3、m4，且 msg_id 升序
+        assert_eq!(resp.messages[0].content, Bytes::from_static(b"m2"));
+        assert_eq!(resp.messages[2].content, Bytes::from_static(b"m4"));
+        assert!(
+            resp.messages[0].msg_id < resp.messages[2].msg_id,
+            "离线队列按 msg_id 升序"
+        );
+    }
+
+    /// 断连收尾：连接死亡后路由被注销（带 conn_id 校验），
+    /// 同账号可立即重连登录。
+    #[tokio::test]
+    async fn disconnect_unregisters_session() {
+        let (addr, sessions, _shutdown) = server().await;
+        let mut alice = TestClient::connect(addr).await;
+        assert!(alice.handshake(1, "t").await.is_accepted());
+
+        drop(alice); // 直接断开（客户端崩溃/网络中断的最简模拟）
+
+        // 收尾是异步的（网关先感知 EOF）：轮询等它发生
+        for _ in 0..100 {
+            if sessions.online_count() == 0 {
+                break;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(sessions.online_count(), 0, "断连后路由应被注销");
+
+        // 同账号重连成功（旧路由已摘掉，不会 AlreadyOnline）
+        let mut alice2 = TestClient::connect(addr).await;
+        assert!(alice2.handshake(1, "t").await.is_accepted());
+    }
+
+    /// 下行帧序号：离线批量同步时消息按 msg_id 升序（入队序 = 雪花生成序）。
+    #[tokio::test]
+    async fn offline_batch_is_ordered_by_msg_id() {
+        let (addr, _sessions, _shutdown) = server().await;
+        let mut alice = TestClient::connect(addr).await;
+        assert!(alice.handshake(1, "t").await.is_accepted());
+
+        // 三条离线消息
+        for i in 0..3 {
+            alice.send_msg(2, format!("s{i}").as_bytes()).await;
+        }
+        for _ in 0..3 {
+            let _: MsgAck = alice.recv().await;
+        }
+
+        let mut bob = TestClient::connect(addr).await;
+        assert!(bob.handshake(2, "t").await.is_accepted());
+        let resp = bob.sync(0).await;
+        assert_eq!(resp.messages.len(), 3);
+        assert!(resp.messages[0].msg_id < resp.messages[1].msg_id);
+        assert!(resp.messages[1].msg_id < resp.messages[2].msg_id);
+    }
+}
+
