@@ -68,7 +68,7 @@ const ID_RETRY_ATTEMPTS: u32 = 3;
 // 认证
 // ────────────────────────────────────────────────────────────────
 
-/// 认证策略：校验「user_id + token 是否匹配」。
+/// 认证策略：校验「`user_id` + `token` 是否匹配」。
 ///
 /// 阶段 3 是明文比对；阶段 7 升级为挑战-应答时**只换实现**，
 /// 会话层的代码一行不改——这就是依赖注入买来的可替换性。
@@ -247,6 +247,7 @@ impl Sessions {
     /// 注销下线（连接收尾时调用）：值校验——只有正确的 `conn_id` 才摘得掉。
     ///
     /// 返回是否真的移除（`false` = 已被顶替或不存在，不动是对的）。
+    #[must_use]
     pub fn unregister(&self, user_id: u64, conn_id: u64) -> bool {
         // 谓词版注销：避免为了值校验去构造占位句柄
         self.inner.router.remove_if(user_id, |session| session.conn_id == conn_id)
@@ -259,6 +260,10 @@ impl Sessions {
     }
 
     /// 某用户的离线消息数（诊断指标与测试）。
+    ///
+    /// # Panics
+    ///
+    /// 离线表锁中毒时 panic。
     #[must_use]
     pub fn offline_count(&self, user_id: u64) -> usize {
         self.inner
@@ -304,6 +309,10 @@ impl Sessions {
     /// 所以「取走头部大于游标的元素」天然就是顺序分页。
     /// 已同步过的（`msg_id <= since`）顺手丢弃——游标之前的数据没有
     /// 保留价值（阶段 4 持久化后改为「送达确认游标」更严谨）。
+    ///
+    /// # Panics
+    ///
+    /// 离线表锁中毒时 panic。
     #[must_use]
     pub fn sync_since(&self, user_id: u64, since: u64, batch: usize) -> Vec<Msg> {
         let mut offline = self.inner.offline.lock().expect("离线表锁中毒");
@@ -390,6 +399,10 @@ async fn reply<T: Payload>(
 /// # Errors
 ///
 /// 返回网关的结束原因（连接为何终结）；会话层自身没有 IO 失败路径。
+///
+/// # Panics
+///
+/// 网关 task panic 时 panic（属实现 bug，应立即暴露）。
 pub async fn serve_connection(
     sessions: &Sessions,
     conn_id: u64,
@@ -441,7 +454,7 @@ async fn handle_frame(
 
     match frame.cmd {
         im_protocol::Cmd::Handshake => {
-            handle_handshake(sessions, state, conn_id, handle, &frame).await
+            handle_handshake(sessions, state, conn_id, handle, &frame).await;
         }
         im_protocol::Cmd::Msg => handle_msg(sessions, state, handle, &frame).await,
         im_protocol::Cmd::SyncReq => handle_sync(sessions, state, handle, &frame).await,
@@ -484,12 +497,14 @@ async fn handle_handshake(
         return;
     };
 
-    let ack = match sessions.register(hs.user_id, conn_id, handle.clone()) {
-        Err(_) => HandshakeAck::rejected("already online"), // 单端登录：顶不掉旧连接
-        Ok(()) => {
-            state.user = Some(hs.user_id);
-            HandshakeAck::accepted(session_id)
-        }
+    let ack = if sessions
+        .register(hs.user_id, conn_id, handle.clone())
+        .is_err()
+    {
+        HandshakeAck::rejected("already online") // 单端登录：顶不掉旧连接
+    } else {
+        state.user = Some(hs.user_id);
+        HandshakeAck::accepted(session_id)
     };
     let _ = reply(state, handle, &ack).await;
 }
@@ -667,7 +682,7 @@ mod tests {
             self.recv().await
         }
 
-        /// 发一条上行消息（from/msg_id 留给服务端裁决）。
+        /// 发一条上行消息（`from`/`msg_id` 留给服务端裁决）。
         async fn send_msg(&mut self, to: u64, content: &[u8]) {
             let msg = Msg {
                 from: 0,
@@ -698,7 +713,7 @@ mod tests {
         }
     }
 
-    /// 握手成功：session_id 是雪花 ID（非零），路由表 +1。
+    /// 握手成功：`session_id` 是雪花 ID（非零），路由表 +1。
     #[tokio::test]
     async fn handshake_accepts_and_assigns_session_id() {
         let (addr, sessions, _shutdown) = server().await;
@@ -745,7 +760,7 @@ mod tests {
     }
 
     /// 主线用例：两个在线用户互发——Bob 收到被改写 sender 的下行消息，
-    /// Alice 收到携带同一 msg_id 的确认。
+    /// Alice 收到携带同一 `msg_id` 的确认。
     #[tokio::test]
     async fn msg_routes_between_online_users() {
         let (addr, _sessions, _shutdown) = server().await;
@@ -869,7 +884,7 @@ mod tests {
         );
     }
 
-    /// 断连收尾：连接死亡后路由被注销（带 conn_id 校验），
+    /// 断连收尾：连接死亡后路由被注销（带 `conn_id` 校验），
     /// 同账号可立即重连登录。
     #[tokio::test]
     async fn disconnect_unregisters_session() {
@@ -893,7 +908,7 @@ mod tests {
         assert!(alice2.handshake(1, "t").await.is_accepted());
     }
 
-    /// 下行帧序号：离线批量同步时消息按 msg_id 升序（入队序 = 雪花生成序）。
+    /// 下行帧序号：离线批量同步时消息按 `msg_id` 升序（入队序 = 雪花生成序）。
     #[tokio::test]
     async fn offline_batch_is_ordered_by_msg_id() {
         let (addr, _sessions, _shutdown) = server().await;

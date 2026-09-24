@@ -155,7 +155,7 @@ impl<V: Clone> Router<V> {
     pub fn remove_if(&self, user_id: u64, predicate: impl FnOnce(&V) -> bool) -> bool {
         let shard = &self.shards[self.shard_index(user_id)];
         let mut guard = shard.lock().expect("路由表锁中毒");
-        if guard.get(&user_id).is_some_and(|value| predicate(value)) {
+        if guard.get(&user_id).is_some_and(predicate) {
             guard.remove(&user_id);
             true
         } else {
