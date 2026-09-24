@@ -70,11 +70,9 @@ impl Crc32 {
         }
     }
 
-    /// 结束计算，输出最终 CRC-32 值。
-    ///
-    /// 按**值消耗** `self`：计算器用完即弃，防止误把旧状态带进下一帧。
+    /// 结束计算，输出最终 CRC-32 值（不消耗 `self`，可继续查询）。
     #[must_use]
-    pub fn finish(self) -> u32 {
+    pub fn finish(&self) -> u32 {
         self.state ^ 0xFFFF_FFFF
     }
 }
