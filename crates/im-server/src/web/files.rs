@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
+use super::id_i64;
 use crate::session::Sessions;
 
 /// 文件域错误。
@@ -58,9 +59,8 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for FileMeta {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         Ok(Self {
-            id: u64::try_from(row.try_get::<i64, _>("id")?).expect("雪花 ID 装得下 u64"),
-            owner_id: u64::try_from(row.try_get::<i64, _>("owner_id")?)
-                .expect("雪花 ID 装得下 u64"),
+            id: id_u64(row.try_get::<i64, _>("id")?),
+            owner_id: id_u64(row.try_get::<i64, _>("owner_id")?),
             filename: row.try_get("filename")?,
             size_bytes: u64::try_from(row.try_get::<i64, _>("size_bytes")?)
                 .expect("文件大小装得下 u64"),
@@ -127,8 +127,8 @@ impl FileStore {
              VALUES ($1, $2, $3, $4, $5)
              RETURNING id, owner_id, filename, size_bytes, sha256",
         )
-        .bind(i64::try_from(file_id).expect("雪花 ID 装得下 i64"))
-        .bind(i64::try_from(owner_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(file_id))
+        .bind(id_i64(owner_id))
         .bind(filename)
         .bind(i64::try_from(content.len()).expect("大小已限 64MiB，装得下 i64"))
         .bind(&sha256)
@@ -151,7 +151,7 @@ impl FileStore {
         sqlx::query_as::<_, FileMeta>(
             "SELECT id, owner_id, filename, size_bytes, sha256 FROM files WHERE id = $1",
         )
-        .bind(i64::try_from(file_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(file_id))
         .fetch_optional(&self.pool)
         .await?
         .ok_or(FileError::NotFound)

@@ -2,6 +2,7 @@
 
 use sqlx::PgPool;
 
+use super::{id_i64, id_u64};
 use crate::session::Sessions;
 
 /// 群组域错误。
@@ -50,10 +51,9 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for Group {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         Ok(Self {
-            id: u64::try_from(row.try_get::<i64, _>("id")?).expect("雪花 ID 装得下 u64"),
+            id: id_u64(row.try_get::<i64, _>("id")?),
             name: row.try_get("name")?,
-            owner_id: u64::try_from(row.try_get::<i64, _>("owner_id")?)
-                .expect("雪花 ID 装得下 u64"),
+            owner_id: id_u64(row.try_get::<i64, _>("owner_id")?),
         })
     }
 }
@@ -90,21 +90,21 @@ impl GroupStore {
         let Some(group_id) = ids.next_id().await else {
             return Err(GroupError::IdUnavailable);
         };
-        let owner = i64::try_from(owner_id).expect("雪花 ID 装得下 i64");
+        let owner = id_i64(owner_id);
 
         let mut tx = self.pool.begin().await?;
         let group = sqlx::query_as::<_, Group>(
             "INSERT INTO groups (id, name, owner_id) VALUES ($1, $2, $3)
              RETURNING id, name, owner_id",
         )
-        .bind(i64::try_from(group_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(group_id))
         .bind(name.trim())
         .bind(owner)
         .fetch_one(&mut *tx)
         .await?;
 
         sqlx::query("INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')")
-            .bind(i64::try_from(group.id).expect("雪花 ID 装得下 i64"))
+            .bind(id_i64(group.id))
             .bind(owner)
             .execute(&mut *tx)
             .await?;
@@ -128,8 +128,8 @@ impl GroupStore {
         operator_id: u64,
         user_id: u64,
     ) -> Result<(), GroupError> {
-        let group = i64::try_from(group_id).expect("雪花 ID 装得下 i64");
-        let operator = i64::try_from(operator_id).expect("雪花 ID 装得下 i64");
+        let group = id_i64(group_id);
+        let operator = id_i64(operator_id);
 
         // 权限校验与插入之间没有锁——单机开发可接受；并发拉人竞争
         // 由主键约束兜底（重复插入幂等吞掉）
@@ -148,7 +148,7 @@ impl GroupStore {
              ON CONFLICT (group_id, user_id) DO NOTHING",
         )
         .bind(group)
-        .bind(i64::try_from(user_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(user_id))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -167,16 +167,16 @@ impl GroupStore {
              WHERE m.user_id = $1
              ORDER BY g.id",
         )
-        .bind(i64::try_from(user_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(user_id))
         .fetch_all(&self.pool)
         .await?;
 
         Ok(rows
             .into_iter()
             .map(|(id, name, owner_id, role)| MyGroup {
-                id: u64::try_from(id).expect("雪花 ID 装得下 u64"),
+                id: id_u64(id),
                 name,
-                owner_id: u64::try_from(owner_id).expect("雪花 ID 装得下 u64"),
+                owner_id: id_u64(owner_id),
                 role,
             })
             .collect())
