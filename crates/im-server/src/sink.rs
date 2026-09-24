@@ -112,6 +112,7 @@ mod tests {
 
         // 起一个真实网关：入站帧直接丢弃，只为拿到发送句柄
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
         let (inbound_tx, mut inbound_rx) = mpsc::channel(4);
         let (shutdown_tx, shutdown_rx) = im_transport::shutdown_channel();
         tokio::spawn(async move {
@@ -127,14 +128,8 @@ mod tests {
 
         // 客户端裸连接：发一帧 Msg 换取入站事件附带的 handle
         // （不能用 Ping——Server 心跳策略会就地应答，帧进不了入站通道）
-        let mut client =
-            im_transport::Connection::connect(&listener.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
-        client
-            .write_frame(&Frame::new(Cmd::Msg, 1, 0, Bytes::new()))
-            .await
-            .unwrap();
+        let mut client = im_transport::Connection::connect(&addr.to_string()).await.unwrap();
+        client.write_frame(&Frame::new(Cmd::Msg, 1, 0, Bytes::new())).await.unwrap();
 
         let event = timeout(Duration::from_secs(2), inbound_rx.recv())
             .await
@@ -143,9 +138,7 @@ mod tests {
 
         // 经 trait 发送（而非固有方法）：客户端应原样收到
         let frame = Frame::new(Cmd::MsgAck, 9, 2, Bytes::from_static(b"adapted"));
-        FrameSink::send(&event.handle, frame.clone())
-            .await
-            .expect("网关存活，trait 发送应成功");
+        FrameSink::send(&event.handle, frame.clone()).await.expect("网关存活，trait 发送应成功");
 
         let got = timeout(Duration::from_secs(2), client.read_frame())
             .await

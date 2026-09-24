@@ -11,6 +11,7 @@
 
 pub mod router;
 pub mod session;
+pub mod sink;
 pub mod snowflake;
 
 pub use router::{Router, RouterError};
@@ -18,4 +19,5 @@ pub use session::{
     AllowAll, Authenticator, DEFAULT_MAX_OFFLINE_PER_USER, DEFAULT_SYNC_BATCH, SessionConfig,
     SessionHandle, Sessions, StaticToken, serve, serve_connection, spawn_server,
 };
+pub use sink::{FrameSink, SendFuture};
 pub use snowflake::{Snowflake, SnowflakeError, SystemClock};

@@ -234,8 +234,7 @@ impl Sessions {
         conn_id: u64,
         sink: Arc<dyn FrameSink>,
     ) -> Result<(), RouterError> {
-        let session_handle =
-            SessionHandle { conn_id, send_seq: Arc::new(AtomicU64::new(0)), sink };
+        let session_handle = SessionHandle { conn_id, send_seq: Arc::new(AtomicU64::new(0)), sink };
         self.inner.router.register(user_id, session_handle)
     }
 
@@ -426,7 +425,7 @@ pub async fn serve_connection(
     }
 
     // 连接生命周期的权威结论来自网关
-    gateway.expect("网关 task 不应 panic").await
+    gateway.await.expect("网关 task 不应 panic")
 }
 
 /// 业务帧分发：握手 / 消息 / 同步三正餐，其余忽略。
@@ -637,6 +636,18 @@ mod tests {
         client_msg_id: u64,
     }
 
+    /// 非 TCP 的帧发送端（WS 路径的形状预演）：出站通道直出。
+    ///
+    /// 用它验证传输解耦——会话核心（deliver/register）不感知传输类型。
+    #[derive(Debug)]
+    struct TestSink(mpsc::Sender<im_protocol::Frame>);
+
+    impl crate::sink::FrameSink for TestSink {
+        fn send(&self, frame: im_protocol::Frame) -> crate::sink::SendFuture<'_> {
+            Box::pin(async move { self.0.send(frame).await.map_err(|_| TransportError::Closed) })
+        }
+    }
+
     impl TestClient {
         async fn connect(addr: SocketAddr) -> Self {
             Self {
@@ -702,6 +713,30 @@ mod tests {
                 "不应有任何回帧"
             );
         }
+    }
+
+    /// 传输解耦回归：注册一个非 TCP 的自定义 sink，`deliver` 照常送达——
+    /// WS 网关能复用会话核心的前提条件。
+    #[tokio::test]
+    async fn deliver_works_with_custom_frame_sink() {
+        let sessions = Sessions::new(test_config());
+        let (tx, mut rx) = mpsc::channel(4);
+        sessions.register(42, 1, Arc::new(TestSink(tx))).expect("首个注册不应冲突");
+
+        let msg = Msg {
+            from: 1,
+            to: 42,
+            msg_id: 7,
+            client_msg_id: 1,
+            content: Bytes::from_static(b"via-custom-sink"),
+        };
+        sessions.deliver(&msg).await;
+
+        let frame = timeout(WAIT, rx.recv()).await.expect("2s 内应收到帧").expect("sink 存活");
+        assert_eq!(frame.seq, 1, "下行序号从 1 开始");
+        let decoded = Msg::decode_frame(&frame).expect("载荷应与命令字匹配");
+        assert_eq!(decoded.msg_id, 7);
+        assert_eq!(decoded.content, Bytes::from_static(b"via-custom-sink"));
     }
 
     /// 握手成功：`session_id` 是雪花 ID（非零），路由表 +1。
