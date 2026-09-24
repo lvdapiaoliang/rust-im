@@ -72,10 +72,9 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
             let sender = handle.clone();
+            let content = Bytes::copy_from_slice(content.as_bytes());
             tokio::spawn(async move {
-                let _ = sender
-                    .send_msg(to, Bytes::copy_from_slice(content.as_bytes()))
-                    .await;
+                let _ = sender.send_msg(to, content).await;
             });
         }
         shutdown_tx.trigger();
