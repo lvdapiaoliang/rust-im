@@ -53,6 +53,16 @@ crates/
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 
+## 从零学习 Rust
+
+另有独立的完整学习体系（语言从零到 Tokio 深度、Rust 版算法与数据结构、Rust 设计模式），见 [learning-rust-from-scratch/](learning-rust-from-scratch/README.md)：
+
+- [01-basics](learning-rust-from-scratch/01-basics/) —— 语法从零开始（5 篇）
+- [02-core](learning-rust-from-scratch/02-core/) —— 所有权/泛型/智能指针（5 篇）
+- [03-tokio](learning-rust-from-scratch/03-tokio/) —— 异步重点深度系列（7 篇，含手写 Future/Timer）
+- [04-algorithms](learning-rust-from-scratch/04-algorithms/) —— 算法与数据结构 Rust 版（7 篇，含手写环形缓冲/哈希表/堆）
+- [05-patterns](learning-rust-from-scratch/05-patterns/) —— Rust 设计模式（4 篇，NEWTYPE/Typestate/Actor 等）
+
 ## 性能目标（三级里程碑）
 
 所有数字压测前为**目标值**，压测后附脚本与原始数据：
