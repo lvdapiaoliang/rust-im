@@ -581,6 +581,12 @@ mod tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    /// 唯一且在注册校验窗口（3~32 字符）内的用户名。
+    fn unique_username() -> String {
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        format!("t_{}", &id[..16])
+    }
+
     /// 尽力清理测试数据。
     async fn cleanup(pool: &PgPool, usernames: &[&str], root: &PathBuf) {
         for name in usernames {
@@ -599,7 +605,7 @@ mod tests {
             eprintln!("skip: PostgreSQL 不可达");
             return;
         };
-        let username = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let username = unique_username();
 
         let (token, user) = register_and_login(&app, &username, "pass1234").await;
         assert_eq!(user.username, username.to_lowercase());
@@ -640,8 +646,8 @@ mod tests {
             eprintln!("skip: PostgreSQL 不可达");
             return;
         };
-        let name_a = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let name_b = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let name_a = unique_username();
+        let name_b = unique_username();
         let (token_a, user_a) = register_and_login(&app, &name_a, "pass1234").await;
         let (token_b, user_b) = register_and_login(&app, &name_b, "pass1234").await;
 
@@ -730,8 +736,8 @@ mod tests {
             eprintln!("skip: PostgreSQL 不可达");
             return;
         };
-        let name_a = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let name_b = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let name_a = unique_username();
+        let name_b = unique_username();
         let (token_a, _user_a) = register_and_login(&app, &name_a, "pass1234").await;
         let (token_b, user_b) = register_and_login(&app, &name_b, "pass1234").await;
 
@@ -795,7 +801,7 @@ mod tests {
             eprintln!("skip: PostgreSQL 不可达");
             return;
         };
-        let username = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let username = unique_username();
         let (token, _user) = register_and_login(&app, &username, "pass1234").await;
 
         // 手工拼 multipart 体（测试不引 multer 这类额外依赖）
