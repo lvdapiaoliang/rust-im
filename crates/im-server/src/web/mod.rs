@@ -28,3 +28,23 @@ pub mod db;
 pub mod files;
 pub mod friends;
 pub mod groups;
+
+/// `u64` 雪花 ID → `i64`（PG `BIGINT`）：发号器保证 < 2^63。
+///
+/// 集中转换、集中 panic 文档——各仓储的 `bind` 不再重复 `expect`。
+///
+/// # Panics
+///
+/// ID ≥ 2^63 时 panic（发号器保证不会发生）。
+pub(crate) fn id_i64(id: u64) -> i64 {
+    i64::try_from(id).expect("雪花 ID 装得下 i64")
+}
+
+/// [`id_i64`] 的反向转换（行元组/`FromRow` → 领域实体用）。
+///
+/// # Panics
+///
+/// ID < 0 时 panic（列上存的都是雪花 ID，不会为负）。
+pub(crate) fn id_u64(id: i64) -> u64 {
+    u64::try_from(id).expect("雪花 ID 装得下 u64")
+}

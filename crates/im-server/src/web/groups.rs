@@ -103,13 +103,11 @@ impl GroupStore {
         .fetch_one(&mut *tx)
         .await?;
 
-        sqlx::query(
-            "INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')",
-        )
-        .bind(i64::try_from(group.id).expect("雪花 ID 装得下 i64"))
-        .bind(owner)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')")
+            .bind(i64::try_from(group.id).expect("雪花 ID 装得下 i64"))
+            .bind(owner)
+            .execute(&mut *tx)
+            .await?;
 
         tx.commit().await?;
         Ok(group)

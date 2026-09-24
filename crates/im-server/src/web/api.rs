@@ -18,7 +18,7 @@ use axum::extract::multipart::Multipart;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router, extract::FromRequestParts};
 use sqlx::PgPool;
 
@@ -253,13 +253,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/register", post(register))
         .route("/api/login", post(login))
         .route("/api/me", get(me))
-        .route(
-            "/api/friends/requests",
-            post(create_friend_request).get(list_friend_requests),
-        )
+        .route("/api/friends/requests", post(create_friend_request).get(list_friend_requests))
         .route("/api/friends/requests/{id}/accept", post(accept_friend_request))
         .route("/api/friends/requests/{id}/reject", post(reject_friend_request))
-        .route("/api/friends", get(list_friends).delete(delete_friend))
+        .route("/api/friends", get(list_friends))
+        .route("/api/friends/{user_id}", delete(delete_friend))
         .route("/api/groups", post(create_group).get(my_groups))
         .route("/api/groups/{id}/members", post(add_group_member))
         .route("/api/files", post(upload_file))
@@ -436,16 +434,12 @@ async fn upload_file(
         if field.name() != Some("file") {
             continue; // 忽略其他字段（前端附带的自定义元数据等）
         }
-        let filename = field
-            .file_name()
-            .map_or_else(|| "unnamed".to_string(), sanitize_filename);
+        let filename = field.file_name().map_or_else(|| "unnamed".to_string(), sanitize_filename);
 
         // 分块累积：超限即刻熔断（不给恶意大文件灌满内存的机会）
         let mut content = Vec::new();
-        while let Some(chunk) = field
-            .chunk()
-            .await
-            .map_err(|e| ApiError::bad_request(format!("读取字段失败: {e}")))?
+        while let Some(chunk) =
+            field.chunk().await.map_err(|e| ApiError::bad_request(format!("读取字段失败: {e}")))?
         {
             if content.len() + chunk.len() > MAX_FILE_SIZE {
                 return Err(FileError::TooLarge.into());
@@ -525,11 +519,7 @@ mod tests {
     }
 
     /// 注册 + 登录，返回 (token, user)。
-    async fn register_and_login(
-        app: &Router,
-        username: &str,
-        password: &str,
-    ) -> (String, User) {
+    async fn register_and_login(app: &Router, username: &str, password: &str) -> (String, User) {
         let register = Request::post("/api/register")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
@@ -561,7 +551,12 @@ mod tests {
     }
 
     /// 带 Bearer 的 GET/POST/DELETE 快捷构造。
-    fn authed(method: &str, uri: &str, token: &str, json: Option<serde_json::Value>) -> Request<Body> {
+    fn authed(
+        method: &str,
+        uri: &str,
+        token: &str,
+        json: Option<serde_json::Value>,
+    ) -> Request<Body> {
         let mut builder = Request::builder()
             .method(method)
             .uri(uri)
@@ -590,10 +585,8 @@ mod tests {
     /// 尽力清理测试数据。
     async fn cleanup(pool: &PgPool, usernames: &[&str], root: &PathBuf) {
         for name in usernames {
-            let _ = sqlx::query("DELETE FROM users WHERE username = $1")
-                .bind(name)
-                .execute(pool)
-                .await;
+            let _ =
+                sqlx::query("DELETE FROM users WHERE username = $1").bind(name).execute(pool).await;
         }
         let _ = tokio::fs::remove_dir_all(root).await;
     }
@@ -610,11 +603,7 @@ mod tests {
         let (token, user) = register_and_login(&app, &username, "pass1234").await;
         assert_eq!(user.username, username.to_lowercase());
 
-        let resp = app
-            .clone()
-            .oneshot(authed("GET", "/api/me", &token, None))
-            .await
-            .unwrap();
+        let resp = app.clone().oneshot(authed("GET", "/api/me", &token, None)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let me = json_body(resp).await;
         assert_eq!(me["id"], serde_json::json!(user.id));
@@ -702,11 +691,8 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let resp = app
-            .clone()
-            .oneshot(authed("GET", "/api/friends", &token_b, None))
-            .await
-            .unwrap();
+        let resp =
+            app.clone().oneshot(authed("GET", "/api/friends", &token_b, None)).await.unwrap();
         let friends = json_body(resp).await;
         assert_eq!(friends.as_array().unwrap().len(), 1);
         assert_eq!(friends[0]["id"], serde_json::json!(user_a.id));
@@ -718,11 +704,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let resp = app
-            .clone()
-            .oneshot(authed("GET", "/api/friends", &token_a, None))
-            .await
-            .unwrap();
+        let resp =
+            app.clone().oneshot(authed("GET", "/api/friends", &token_a, None)).await.unwrap();
         let friends = json_body(resp).await;
         assert!(friends.as_array().unwrap().is_empty(), "删除后应为空");
 
@@ -769,11 +752,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
 
         // B 的群列表里能看到，角色 member
-        let resp = app
-            .clone()
-            .oneshot(authed("GET", "/api/groups", &token_b, None))
-            .await
-            .unwrap();
+        let resp = app.clone().oneshot(authed("GET", "/api/groups", &token_b, None)).await.unwrap();
         let groups = json_body(resp).await;
         assert_eq!(groups.as_array().unwrap().len(), 1);
         assert_eq!(groups[0]["role"], serde_json::json!("member"));
@@ -835,11 +814,12 @@ hello file content\r
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert!(resp
-            .headers()
-            .get(header::CONTENT_DISPOSITION)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|v| v.contains("hello.txt")));
+        assert!(
+            resp.headers()
+                .get(header::CONTENT_DISPOSITION)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.contains("hello.txt"))
+        );
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         assert_eq!(bytes.to_vec(), payload);
 

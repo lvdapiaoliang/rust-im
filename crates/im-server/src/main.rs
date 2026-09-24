@@ -39,7 +39,8 @@ async fn main() -> Result<()> {
         .context("初始化文件存储目录失败")?;
 
     // ── Web 服务：REST（WS 网关阶段 5 后续接入同一端口）──
-    let web_listener = TcpListener::bind(&web_addr).await.with_context(|| format!("绑定 {web_addr} 失败"))?;
+    let web_listener =
+        TcpListener::bind(&web_addr).await.with_context(|| format!("绑定 {web_addr} 失败"))?;
     println!("im-server web  listening on http://{web_addr} (REST /api)");
     tokio::spawn(async move {
         if let Err(e) = axum::serve(web_listener, api::router(state)).await {

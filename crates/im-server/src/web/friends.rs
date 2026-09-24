@@ -91,11 +91,10 @@ impl FriendStore {
             return Err(FriendError::SelfRequest);
         }
         // 目标必须存在：外键其实兜底，但先查能给出更准确的业务错误
-        let target: Option<i64> =
-            sqlx::query_scalar("SELECT id FROM users WHERE id = $1")
-                .bind(i64::try_from(to_user).expect("雪花 ID 装得下 i64"))
-                .fetch_optional(&self.pool)
-                .await?;
+        let target: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE id = $1")
+            .bind(i64::try_from(to_user).expect("雪花 ID 装得下 i64"))
+            .fetch_optional(&self.pool)
+            .await?;
         if target.is_none() {
             return Err(FriendError::UserNotFound);
         }
@@ -120,10 +119,8 @@ impl FriendStore {
         .await?;
 
         // RETURNING 没带双方用户名：补一次轻量查询（两个主键点查）
-        let (from_username, to_username) = self
-            .fetch_usernames(row.1, row.2)
-            .await
-            .ok_or(FriendError::UserNotFound)?;
+        let (from_username, to_username) =
+            self.fetch_usernames(row.1, row.2).await.ok_or(FriendError::UserNotFound)?;
         Ok(FriendRequestView {
             id: u64::try_from(row.0).expect("雪花 ID 装得下 u64"),
             from_user: u64::try_from(row.1).expect("雪花 ID 装得下 u64"),
