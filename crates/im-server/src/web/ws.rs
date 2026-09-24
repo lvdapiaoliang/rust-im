@@ -431,8 +431,12 @@ async fn dispatch_inbound(
                     "message": "仅好友之间可以发送消息",
                     "client_msg_id": msg.client_msg_id.to_string(),
                 });
-                let _ =
-                    tx.try_send(Outbound::Text(outbound_envelope(envelope_type::ERROR, env.seq, 0, &payload)));
+                let _ = tx.try_send(Outbound::Text(outbound_envelope(
+                    envelope_type::ERROR,
+                    env.seq,
+                    0,
+                    &payload,
+                )));
                 return;
             }
         }
