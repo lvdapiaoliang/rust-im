@@ -210,9 +210,12 @@ name = "im-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "im-crypto",
  "im-protocol",
+ "im-server",
  "im-transport",
+ "thiserror",
  "tokio",
 ]
 
