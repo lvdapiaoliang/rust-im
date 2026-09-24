@@ -7,7 +7,7 @@
 //! - **输入**：把按键翻译成 [`ClientHandle`] 命令或本地 UI 状态
 //!   （选中会话/输入缓冲/滚动偏移）。
 //!
-//! 业务逻辑为零——去重、重传、持久化全部在 client_loop 侧，
+//! 业务逻辑为零——去重、重传、持久化全部在 `client_loop` 侧，
 //! TUI 对协议一无所知。
 //!
 //! # 布局
@@ -93,9 +93,9 @@ fn parse_input(line: &str) -> InputAction {
         let (cmd, arg) = rest.split_once(' ').unwrap_or((rest, ""));
         return match (cmd, arg.trim().parse::<u64>()) {
             ("to", Ok(peer)) => InputAction::SwitchTo(peer),
-            ("to", Err(_)) => InputAction::Ignored, // /to 后面不是数字
             ("quit", _) => InputAction::Quit,
-            _ => InputAction::Ignored,              // 未知命令
+            // `/to` 格式错误与未知命令同样无动作（解析失败落入通配）
+            _ => InputAction::Ignored,
         };
     }
     InputAction::Send {
@@ -103,7 +103,7 @@ fn parse_input(line: &str) -> InputAction {
     }
 }
 
-/// TUI 本地状态（不属于 ChatState 的「视口」部分）。
+/// TUI 本地状态（不属于 [`ChatState`] 的「视口」部分）。
 struct Viewport {
     /// 输入缓冲。
     input: String,

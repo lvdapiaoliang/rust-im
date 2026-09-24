@@ -11,7 +11,7 @@
 //!
 //! # 算法/模式落点
 //!
-//! - **BTreeMap<u64, Conversation>**：会话按 peer 有序（侧栏列表
+//! - **`BTreeMap`<u64, Conversation>**：会话按 peer 有序（侧栏列表
 //!   天然字典序），B 树思想（有序 + 范围扫描）；
 //! - **reducer 模式**：事件驱动的纯状态机（事件溯源的内存版——
 //!   事件流即真相，状态只是缓存）。
@@ -81,8 +81,9 @@ impl ChatState {
     pub fn on_event(&mut self, event: &ClientEvent, self_id: u64) {
         match event {
             ClientEvent::Connected { .. } => self.connected = true,
-            ClientEvent::Disconnected => self.connected = false,
-            ClientEvent::Rejected { .. } => self.connected = false,
+            ClientEvent::Disconnected | ClientEvent::Rejected { .. } => {
+                self.connected = false
+            }
             ClientEvent::MessageQueued {
                 client_msg_id,
                 to,
@@ -137,16 +138,19 @@ impl ChatState {
     }
 
     /// 会话列表（peer 升序——BTreeMap 迭代天然有序）。
+    #[must_use]
     pub fn peers(&self) -> Vec<u64> {
         self.conversations.keys().copied().collect()
     }
 
     /// 某个会话（无会话返回 `None`）。
+    #[must_use]
     pub fn conversation(&self, peer: u64) -> Option<&Conversation> {
         self.conversations.get(&peer)
     }
 
     /// 是否在线。
+    #[must_use]
     pub fn is_connected(&self) -> bool {
         self.connected
     }

@@ -452,8 +452,9 @@ async fn connect_once(
 /// （所有可靠性承诺已失效，继续运行是自欺）。
 ///
 /// 参数里同时有命令流、帧流、本地状态三类——它们本来就是同一轮
-/// 连接的「三个面」，拆再细也只是搬家（`too_many_arguments` 在此豁免）。
-#[allow(clippy::too_many_arguments)]
+/// 连接的「三个面」，拆再细也只是搬家（`too_many_arguments` 在此豁免；
+/// 三路 select 状态机的长度同理）。
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn message_loop(
     events: &mpsc::Sender<ClientEvent>,
     cmd_rx: &mut mpsc::Receiver<ClientCommand>,
@@ -482,9 +483,8 @@ async fn message_loop(
                     // 先入重发表（持久化 + 分配 client_msg_id）再上线：
                     // Ack 之前它一直是「未确认」，断线/超时都会被重发。
                     // store 与 outbox 是 LocalState 的不同字段，借用互不干扰
-                    let msg = match local.outbox.enqueue(&mut local.store, to, content) {
-                        Ok(msg) => msg,
-                        Err(_) => break Outcome::Stopped, // 磁盘故障
+                    let Ok(msg) = local.outbox.enqueue(&mut local.store, to, content) else {
+                        break Outcome::Stopped; // 磁盘故障
                     };
                     // 上抛「发送中」：UI 立刻显示转圈条目
                     // （在 Ack 之前发出，顺序由同一通道保证）
@@ -706,6 +706,7 @@ mod tests {
     /// 过滤两类「过程噪音」：
     /// - 每次连接后的例行空 `SyncBatch`（连接层噪音）；
     /// - `MessageQueued`（发送过程事件，专门的测试覆盖它的顺序）。
+    ///
     /// 非空批量（离线补投）依然原样上递。
     async fn next_event(events: &mut mpsc::Receiver<ClientEvent>) -> ClientEvent {
         loop {
