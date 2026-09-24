@@ -657,8 +657,10 @@ mod tests {
                 loop {
                     let Ok((stream, _)) = listener.accept().await else { continue };
                     accepted += 1;
-                    if accepted == 1 {
-                        drop(stream); // 首次连接闪断
+                    // 第 1 个连接是 Alice（直连，必须活）；
+                    // 第 2 个是 Bob 的首轮连接——闪断它，制造「断线排队」窗口
+                    if accepted == 2 {
+                        drop(stream);
                     } else {
                         let sessions = sessions.clone();
                         let conn_id = sessions.next_conn_id();
