@@ -283,20 +283,27 @@ fn advance(
     }
 }
 
-/// 从 `buf` 头部逐字节喂 varint 解码器，每个字节同步喂 CRC。
+/// 持续从 `buf` 头部喂入 varint 解码器，直到 varint 结束**或缓冲区耗尽**。
 ///
-/// `Ok(None)` = 缓冲区空了，varint 还没结束（半包，保留解码器状态）。
+/// `Ok(Some(v))` = varint 结束；`Ok(None)` = 缓冲区耗尽且未结束
+/// （解码器进度保留在 `dec` 里，下次继续）。
+/// 每个消费的字节同步喂 CRC。
+///
+/// 注意与“只吐一个字节”的写法区别：那会把「varint 未结束」误当成
+/// 「没字节了」提前退出，多字节 varint 后面还有字节时就会错误地等待。
 fn feed_varint(
     dec: &mut VarIntDecoder,
     buf: &mut BytesMut,
     crc: &mut Crc32,
 ) -> Result<Option<u64>, ProtocolError> {
-    if buf.is_empty() {
-        return Ok(None);
+    while !buf.is_empty() {
+        let byte = buf.get_u8();
+        crc.update(&[byte]);
+        if let Some(v) = dec.push(byte)? {
+            return Ok(Some(v));
+        }
     }
-    let byte = buf.get_u8();
-    crc.update(&[byte]);
-    dec.push(byte)
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -326,13 +333,17 @@ mod tests {
         let wire = frame.encode();
 
         let mut decoder = FrameDecoder::new();
+        let mut got: Vec<Frame> = Vec::new();
         for (i, byte) in wire.iter().enumerate() {
-            let frames = decoder.decode(&[*byte]).unwrap();
+            let frames = decoder.decode(std::slice::from_ref(byte)).unwrap();
             if i + 1 < wire.len() {
                 assert!(frames.is_empty(), "最后一字节前不应有完整帧");
+            } else {
+                got = frames; // 最后一字节到达时帧完整解出
             }
         }
-        assert_eq!(decoder.decode(&[]).unwrap(), vec![frame]);
+        assert_eq!(got, vec![frame]);
+        assert!(decoder.decode(&[]).unwrap().is_empty(), "缓冲区应已清空");
     }
 
     #[test]
@@ -452,7 +463,8 @@ mod tests {
         ) {
             let frame = Frame::new(Cmd::Msg, seq, ack, Bytes::from(payload));
             let wire = frame.encode();
-            let split = split.min(wire.len());
+            // 切分点限制在「真正的半包」范围内：0 <= split < wire.len()
+            let split = split.min(wire.len() - 1);
 
             let mut decoder = FrameDecoder::new();
             let first = decoder.decode(&wire[..split]).unwrap();

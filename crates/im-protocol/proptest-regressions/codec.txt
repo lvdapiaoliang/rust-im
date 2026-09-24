@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 7316b02017a5138ede26ea84addc3101d3d10ed939a34796b48289afb705e104 # shrinks to seq = 0, ack = 16384, payload = [], split = 0
+cc c33c7d05e6f8aea4a10fed3927456cfdd5c2f5548c0c6315535d22218aa1d69f # shrinks to seq = 0, ack = 0, payload = [], split = 12

@@ -106,7 +106,8 @@ mod tests {
         assert_eq!(checksum(b"123456789"), 0xCBF4_3926);
         assert_eq!(checksum(b""), 0x0000_0000);
         assert_eq!(checksum(b"a"), 0xE8B7_BE43);
-        assert_eq!(checksum(b"abc"), 0x3524_416C);
+        // 注：逐位手推验证过（位运算法从 "a" 的已验证中间态续算），勿改
+        assert_eq!(checksum(b"abc"), 0x3524_41C2);
     }
 
     #[test]
@@ -143,7 +144,9 @@ mod tests {
             if let Some(last) = bytes.last() {
                 let mut other = bytes.clone();
                 let last = *last;
-                other.last_mut().map(|l| *l = last.wrapping_add(1));
+                if let Some(l) = other.last_mut() {
+                    *l = last.wrapping_add(1);
+                }
                 // 长度相同、仅末字节不同 → CRC 不同（此处不构造碰撞）
                 prop_assert_ne!(checksum(&bytes), checksum(&other));
             }

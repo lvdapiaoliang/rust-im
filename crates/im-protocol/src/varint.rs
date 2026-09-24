@@ -29,6 +29,11 @@ pub const MAX_VARINT_LEN: usize = 10;
 
 /// 把 `value` 以 varint 编码写入 `dst`，返回写入的字节数。
 ///
+/// # Panics
+///
+/// 理论上不 panic（低 7 位转 `u8` 的 `expect` 在数学上不可达，
+/// 编译器会把分支消除）。
+///
 /// # Examples
 ///
 /// ```
@@ -66,20 +71,20 @@ pub const fn encoded_len(value: u64) -> usize {
     if bits == 0 {
         1
     } else {
-        (bits + 6) / 7
+        bits.div_ceil(7)
     }
 }
 
 /// zigzag 编码：有符号 → 无符号（`0→0, -1→1, 1→2, -2→3…`）。
-// 位运算后符号位已无数值语义，重解释是本算法的核心，无符号丢失可言
-#[allow(clippy::cast_sign_loss)]
+// 位运算后符号位已无数值语义，重解释是本算法的核心，不存在符号丢失或回绕问题
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 #[must_use]
 pub const fn zigzag_encode(v: i64) -> u64 {
-    (((v << 1) ^ (v >> 63)) as u64)
+    ((v << 1) ^ (v >> 63)) as u64
 }
 
 /// zigzag 解码：无符号 → 有符号（[`zigzag_encode`] 的逆映射）。
-#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 #[must_use]
 pub const fn zigzag_decode(u: u64) -> i64 {
     ((u >> 1) as i64) ^ -((u & 1) as i64)
@@ -121,7 +126,7 @@ pub fn decode_u64(src: &[u8]) -> Option<(u64, usize)> {
 ///
 /// 与 `decode_u64`（一次性、需要完整切片）相对，
 /// 它把"解析到第几个字节"存在自身——这正是 [`crate::codec`] 增量解码的基石。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VarIntDecoder {
     /// 已累积的值（低组在前，逐组左移进位）。
     value: u64,
@@ -129,12 +134,6 @@ pub struct VarIntDecoder {
     shift: u32,
     /// 已消费的字节数（用于超长检测）。
     count: usize,
-}
-
-impl Default for VarIntDecoder {
-    fn default() -> Self {
-        Self { value: 0, shift: 0, count: 0 }
-    }
 }
 
 impl VarIntDecoder {
@@ -177,7 +176,8 @@ mod tests {
             (128, &[0x80, 0x01]),
             (300, &[0xAC, 0x02]),
             (16_383, &[0xFF, 0x7F]),
-            (u64::MAX, &[0xFF; 10]),
+            // u64::MAX：前 9 字节各存 7 位（63 位），第 10 字节只剩最高 1 位
+            (u64::MAX, &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]),
         ];
         for &(value, expect) in cases {
             let mut buf = Vec::new();

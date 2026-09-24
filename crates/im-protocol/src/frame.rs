@@ -199,7 +199,8 @@ mod tests {
         let bytes = frame.encode();
 
         assert_eq!(bytes.len(), frame.encoded_len());
-        assert_eq!(bytes.len(), 10); // 5 + 1 + 1 + 1 + 0 + 4（payload 为空）
+        // 5 头 + 1(seq) + 1(ack) + 1(len) + 0(payload) + 4(crc) = 12
+        assert_eq!(bytes.len(), 12);
 
         assert_eq!(&bytes[0..2], &[0x49, 0x4D]); // "IM"
         assert_eq!(bytes[2], crate::VERSION);
@@ -208,8 +209,8 @@ mod tests {
         assert_eq!(bytes[5], 1); // seq = 1
         assert_eq!(bytes[6], 0); // ack = 0
         assert_eq!(bytes[7], 0); // len = 0
-        // 尾部 4 字节 = 头 7 字节的 CRC32
-        let expect = crate::crc32::checksum(&bytes[..7]);
+        // 尾部 4 字节 = 前 8 字节（头 5 + 三个单字节 varint）的 CRC32
+        let expect = crate::crc32::checksum(&bytes[..8]);
         assert_eq!(&bytes[8..12], &expect.to_be_bytes());
     }
 
