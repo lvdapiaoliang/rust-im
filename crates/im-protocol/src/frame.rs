@@ -235,7 +235,7 @@ mod tests {
             Cmd::SyncReq,
             Cmd::SyncResp,
         ] {
-            assert_eq!(Cmd::try_from(cmd.to_byte()), Ok(cmd));
+            assert_eq!(Cmd::try_from(cmd.to_byte()).ok(), Some(cmd));
         }
         assert!(matches!(
             Cmd::try_from(0xFF),

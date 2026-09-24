@@ -340,7 +340,7 @@ mod tests {
         // 粘包：两帧挤在同一次 read 里
         let a = Frame::new(Cmd::Ping, 1, 0, Bytes::new());
         let b = msg_frame(2, b"second");
-        let mut wire = a.encode();
+        let mut wire = a.encode().to_vec();
         wire.extend_from_slice(&b.encode());
 
         let mut decoder = FrameDecoder::new();
@@ -472,7 +472,7 @@ mod tests {
         ) {
             let a = Frame::new(Cmd::Msg, 1, 0, Bytes::from(payload_a));
             let b = Frame::new(Cmd::MsgAck, 2, 1, Bytes::from(payload_b));
-            let mut wire = a.encode();
+            let mut wire = a.encode().to_vec();
             wire.extend_from_slice(&b.encode());
 
             let s1 = s1.min(wire.len());
