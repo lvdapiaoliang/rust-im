@@ -91,8 +91,9 @@ impl Backoff {
         }
         // 均匀采样 [0, cap]：随机数 × cap / u64::MAX
         let r = self.next_random();
-        let millis = u128::from(cap.as_millis()) * u128::from(r) / u128::from(u64::MAX);
-        Duration::from_millis(millis as u64)
+        let millis = cap.as_millis() * u128::from(r) / u128::from(u64::MAX);
+        let millis = u64::try_from(millis).unwrap_or(u64::MAX);
+        Duration::from_millis(millis)
     }
 
     /// 成功后归零：下一次失败从 `base` 档重新起步。
@@ -159,13 +160,14 @@ mod tests {
         assert_eq!(b.ceiling(), Duration::from_secs(8), "超大幂次饱和而非溢出");
     }
 
-    /// jitter 永远不超过档位值、也不小于 0
+    /// jitter 永远不超过当次档位值
     #[test]
     fn jitter_stays_within_tier() {
         let mut b = Backoff::new(Duration::from_millis(100), Duration::from_secs(1));
         for _ in 0..1000 {
+            let tier = b.ceiling(); // 调用前记录档位
             let d = b.next_delay();
-            assert!(d <= Duration::from_millis(100), "超出档位: {d:?}");
+            assert!(d <= tier, "超出档位: {d:?} > {tier:?}");
         }
     }
 
