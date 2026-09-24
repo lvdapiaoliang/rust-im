@@ -319,17 +319,13 @@ fn display_text(content: &[u8]) -> String {
     };
     let filename = || value.get("filename").and_then(serde_json::Value::as_str).unwrap_or("");
     match kind {
-        "text" => value
-            .get("text")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        "text" => {
+            value.get("text").and_then(serde_json::Value::as_str).unwrap_or_default().to_string()
+        }
         // 表情直接展示（Unicode emoji 在终端里本身就是文本）
-        "emoji" => value
-            .get("emoji")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("[表情]")
-            .to_string(),
+        "emoji" => {
+            value.get("emoji").and_then(serde_json::Value::as_str).unwrap_or("[表情]").to_string()
+        }
         "image" => format!("[图片] {}", filename()),
         "file" => format!("[文件] {}", filename()),
         _ => String::from_utf8_lossy(content).into_owned(),
@@ -370,10 +366,12 @@ mod tests {
         assert_eq!(display_text(b"hello"), "hello");
         // JSON 但无 kind 标签：不是内容模型，原样
         assert_eq!(display_text(br#"{"a":1}"#), r#"{"a":1}"#);
-        // Web 端新形态：text 提取正文
-        assert_eq!(display_text(br#"{"kind":"text","text":"你好"}"#), "你好");
+        // Web 端新形态：text 提取正文（raw byte 字面量不收非 ASCII，先造 str 再转字节）
+        let text_json = r#"{"kind":"text","text":"你好"}"#;
+        assert_eq!(display_text(text_json.as_bytes()), "你好");
         // 表情直接展示（终端里 emoji 本就是文本）
-        assert_eq!(display_text(br#"{"kind":"emoji","emoji":"👍"}"#), "👍");
+        let emoji_json = "{\"kind\":\"emoji\",\"emoji\":\"\u{1f44d}\"}";
+        assert_eq!(display_text(emoji_json.as_bytes()), "\u{1f44d}");
         // 文件/图片降级为占位提示 + 文件名
         assert_eq!(
             display_text(br#"{"kind":"file","file_id":"7","filename":"a.pdf","size_bytes":1}"#),
