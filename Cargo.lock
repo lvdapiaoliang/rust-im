@@ -214,6 +214,7 @@ dependencies = [
  "im-crypto",
  "im-protocol",
  "im-server",
+ "im-storage",
  "im-transport",
  "thiserror",
  "tokio",

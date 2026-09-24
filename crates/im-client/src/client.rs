@@ -23,10 +23,13 @@
 //! - **事件驱动**：客户端对业务层只暴露 `ClientEvent` 流，
 //!   UI（阶段 4 的 TUI）订阅事件即可，不碰任何协议细节（观察者模式的通道版）；
 //! - **命令排队即断线缓冲**：断线期间 `send_msg` 只是入队，
-//!   重连成功后由新一轮连接循环统一发出——「无连接时发送」天然被缓冲
-//!   （代价：未 ACK 的消息断线可能丢，阶段 4 本地消息库补重发表）。
+//!   重连成功后由新一轮连接循环统一发出；
+//! - **消息级重传（阶段 4）**：所有上行消息先入 [`Outbox`](crate::outbox)
+//!   （本地持久化），Ack 核销前按指数退避重发——「至少一次」发送，
+//!   配合接收端按 `client_msg_id` 去重拼出「恰好一次」。
 
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
@@ -38,6 +41,8 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
+use crate::outbox::Outbox;
+
 /// 默认心跳间隔（经验值：明显小于服务端 60s 空闲超时）。
 pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// 默认重连基准间隔（full jitter 会在此基础上打散）。
@@ -46,6 +51,10 @@ pub const DEFAULT_BACKOFF_BASE: Duration = Duration::from_secs(1);
 pub const DEFAULT_BACKOFF_MAX: Duration = Duration::from_secs(30);
 /// 握手应答等待上限：超时按连接故障处理（触发重连）。
 pub const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// 消息级重传的首次等待（RTO）：Ack 未到则重发。
+pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
+/// 单条消息最大发送次数（含首次）：超过即放弃并上报 `SendFailed`。
+pub const DEFAULT_RETRY_MAX_ATTEMPTS: u32 = 8;
 
 /// 客户端配置。
 #[derive(Clone, Debug)]
@@ -64,6 +73,15 @@ pub struct ClientConfig {
     pub backoff_max: Duration,
     /// 握手应答等待上限。
     pub handshake_timeout: Duration,
+    /// 本地消息库目录（聊天历史/重发表/游标）。
+    ///
+    /// `None` 时退到进程唯一的临时目录：适合测试与体验，
+    /// 但重启换目录等于丢历史——长期使用的客户端应显式配置。
+    pub data_dir: Option<PathBuf>,
+    /// 消息级重传的首次等待（RTO）。
+    pub retry_timeout: Duration,
+    /// 单条消息最大发送次数（含首次）。
+    pub retry_max_attempts: u32,
 }
 
 impl ClientConfig {
@@ -78,6 +96,9 @@ impl ClientConfig {
             backoff_base: DEFAULT_BACKOFF_BASE,
             backoff_max: DEFAULT_BACKOFF_MAX,
             handshake_timeout: DEFAULT_HANDSHAKE_TIMEOUT,
+            data_dir: None,
+            retry_timeout: DEFAULT_RETRY_TIMEOUT,
+            retry_max_attempts: DEFAULT_RETRY_MAX_ATTEMPTS,
         }
     }
 }
@@ -110,6 +131,14 @@ pub enum ClientEvent {
     Rejected {
         /// 服务端给出的拒绝原因。
         reason: String,
+    },
+    /// 一条上行消息重传次数耗尽仍未被确认：放弃（业务层可提示发送失败）。
+    ///
+    /// 「至少一次」不等于「无限重」——无限重发会拖垮客户端与服务端；
+    /// 达到上限后把决定权交回业务层（重发/放弃/提示）。
+    SendFailed {
+        /// 被放弃消息的去重键（业务层用它找到 UI 上的「转圈」条目）。
+        client_msg_id: u64,
     },
 }
 
@@ -211,9 +240,27 @@ async fn client_loop(
     // 同步游标：已收到的最大 `msg_id`（跨重连保留——重连只补增量）
     let mut last_msg_id = 0u64;
 
+    // 重发邮箱：在途消息的持久化真身（本地磁盘），跨重连/重启存活。
+    // 未配置目录时退到进程唯一临时目录（测试/体验；重启丢历史）
+    let dir = config.data_dir.clone().unwrap_or_else(|| {
+        std::env::temp_dir().join(format!(
+            "im-client-{}-{}-{}",
+            config.user_id,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("系统时钟正常")
+                .as_nanos(),
+        ))
+    });
+    let mut outbox =
+        Outbox::open(&dir, config.retry_timeout, config.retry_max_attempts)
+            .expect("本地消息库应能打开");
+
     loop {
         let (outcome, cursor) =
-            connect_once(&config, &events, &mut cmd_rx, &shutdown, last_msg_id).await;
+            connect_once(&config, &events, &mut cmd_rx, &shutdown, last_msg_id, &mut outbox)
+                .await;
         last_msg_id = cursor;
 
         match outcome {
@@ -241,6 +288,7 @@ async fn connect_once(
     cmd_rx: &mut mpsc::Receiver<ClientCommand>,
     shutdown: &ShutdownRx,
     last_msg_id: u64,
+    outbox: &mut Outbox,
 ) -> (Outcome, u64) {
     // 本轮连接的关停信号：外层 shutdown 或本轮结束时触发，停掉网关
     let (local_shutdown_tx, local_shutdown_rx) = shutdown_channel();
@@ -312,7 +360,7 @@ async fn connect_once(
         return (Outcome::Disconnected, cursor);
     }
 
-    // 6. 消息循环：命令与入站帧双路 select
+    // 6. 消息循环：命令、入站帧、重传定时三路 select
     let (outcome, cursor) = message_loop(
         events,
         cmd_rx,
@@ -321,6 +369,8 @@ async fn connect_once(
         &mut frame_rx,
         &mut send_seq,
         cursor,
+        outbox,
+        config.user_id,
     )
     .await;
 
@@ -328,11 +378,16 @@ async fn connect_once(
     (outcome, cursor)
 }
 
-/// 消息循环：命令与入站帧双路 `select`，直到本轮连接结束。
+/// 消息循环：命令、入站帧、重传定时三路 `select`，直到本轮连接结束。
 ///
 /// 返回（结局, 最新同步游标）。退出路径与结局的对应：
 /// 外部关停/命令通道关闭 → `Stopped`；发送失败/网关退出 → `Disconnected`；
-/// 业务层事件通道关闭 → `Stopped`（客户端没有存在意义）。
+/// 业务层事件通道关闭 → `Stopped`（客户端没有存在意义）；
+/// 本地磁盘故障 → `Stopped`（所有可靠性承诺已失效，继续运行是自欺）。
+///
+/// 参数里同时有命令流、帧流、重发表三类状态——它们本来就是同一轮
+/// 连接的「三个面」，拆再细也只是搬家（`too_many_arguments` 在此豁免）。
+#[allow(clippy::too_many_arguments)]
 async fn message_loop(
     events: &mpsc::Sender<ClientEvent>,
     cmd_rx: &mut mpsc::Receiver<ClientCommand>,
@@ -341,7 +396,20 @@ async fn message_loop(
     frame_rx: &mut mpsc::Receiver<InboundFrame>,
     send_seq: &mut u64,
     mut cursor: u64,
+    outbox: &mut Outbox,
+    self_id: u64,
 ) -> (Outcome, u64) {
+    // 连接建立即补发：重发表里所有未确认消息发一遍（接收端按
+    // `client_msg_id` 去重，重复投递无害）——新连接是一次「全量追赶」，
+    // 不依赖旧连接的 RTO 状态
+    let resends = match outbox.resends() {
+        Ok(msgs) => msgs,
+        Err(_) => return (Outcome::Stopped, cursor), // 磁盘故障
+    };
+    if let Some(outcome) = send_batch(handle, send_seq, resends).await {
+        return (outcome, cursor);
+    }
+
     let outcome = loop {
         tokio::select! {
             // 外部关停：退出（网关在 finish_gateway 里收尾）
@@ -349,8 +417,12 @@ async fn message_loop(
 
             cmd = cmd_rx.recv() => match cmd {
                 Some(ClientCommand::SendMsg { to, content }) => {
-                    // client_msg_id 暂填 0：p4-4 引入跨重连的生成器与重发表
-                    let msg = Msg { from: 0, to, msg_id: 0, client_msg_id: 0, content };
+                    // 先入重发表（持久化 + 分配 client_msg_id）再上线：
+                    // Ack 之前它一直是「未确认」，断线/超时都会被重发
+                    let msg = match outbox.enqueue(to, content) {
+                        Ok(msg) => msg,
+                        Err(_) => break Outcome::Stopped, // 磁盘故障
+                    };
                     *send_seq += 1;
                     // 发送失败 = 本轮连接已死：交给断线路径
                     if handle.send(msg.encode_frame(*send_seq, 0)).await.is_err() {
@@ -359,6 +431,38 @@ async fn message_loop(
                 }
                 None => break Outcome::Stopped, // 业务层放手：正常退出
             },
+
+            // 重传定时：最早到期的未确认消息（无在途时永久挂起）
+            () = async {
+                match outbox.next_deadline() {
+                    Some(deadline) => tokio::time::sleep_until(
+                        tokio::time::Instant::from_std(deadline),
+                    ).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                let Ok((resends, failed)) = outbox.due(Instant::now()) else {
+                    break Outcome::Stopped; // 磁盘故障
+                };
+                // 先上报放弃的，再补发到期的（两者互不影响）
+                let mut events_dead = false;
+                for client_msg_id in failed {
+                    if events
+                        .send(ClientEvent::SendFailed { client_msg_id })
+                        .await
+                        .is_err()
+                    {
+                        events_dead = true;
+                        break;
+                    }
+                }
+                if events_dead {
+                    break Outcome::Stopped;
+                }
+                if let Some(outcome) = send_batch(handle, send_seq, resends).await {
+                    break outcome;
+                }
+            }
 
             frame = frame_rx.recv() => match frame {
                 Some(event) => match event.frame.cmd {
@@ -372,6 +476,14 @@ async fn message_loop(
                     }
                     im_protocol::Cmd::MsgAck => {
                         if let Ok(ack) = MsgAck::decode_frame(&event.frame) {
+                            // 核销重发表：pending → 正式消息。
+                            // 跨重发稳定的是 client_msg_id（重发会换新 msg_id）
+                            if outbox
+                                .ack(ack.client_msg_id, ack.msg_id, self_id)
+                                .is_err()
+                            {
+                                break Outcome::Stopped; // 磁盘故障
+                            }
                             if events
                                 .send(ClientEvent::Ack {
                                     msg_id: ack.msg_id,
@@ -408,6 +520,22 @@ async fn message_loop(
     };
 
     (outcome, cursor)
+}
+
+/// 批量发送一批上行消息：任一发送失败即返回对应结局
+/// （`None` = 全部成功）。连接刚建立时的补发与到期重传共用。
+async fn send_batch(
+    handle: &ConnectionHandle,
+    send_seq: &mut u64,
+    msgs: Vec<Msg>,
+) -> Option<Outcome> {
+    for msg in msgs {
+        *send_seq += 1;
+        if handle.send(msg.encode_frame(*send_seq, 0)).await.is_err() {
+            return Some(Outcome::Disconnected);
+        }
+    }
+    None
 }
 
 /// 收尾一轮连接：触发关停、等网关排干退出。

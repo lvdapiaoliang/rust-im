@@ -202,6 +202,16 @@ impl LocalStore {
         self.engine.put(&key, &pending.encode())
     }
 
+    /// 放弃一条在途消息（超过最大重试次数）：从重发表彻底移除，
+    /// 否则重启后它又会被补发一遍。
+    ///
+    /// # Errors
+    ///
+    /// 磁盘写失败时返回 [`StorageError::Io`]。
+    pub fn drop_outgoing(&mut self, client_msg_id: u64) -> Result<(), StorageError> {
+        self.engine.delete(&pending_key(client_msg_id))
+    }
+
     /// 某会话的最近 `limit` 条消息（`msg_id` 升序）。
     ///
     /// 当前实现取「scan 全量 + 尾部截取」：本地单会话万级消息下

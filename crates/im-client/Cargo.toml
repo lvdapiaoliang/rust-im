@@ -14,6 +14,7 @@ workspace = true
 im-protocol.workspace = true
 im-transport.workspace = true
 im-crypto.workspace = true
+im-storage.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

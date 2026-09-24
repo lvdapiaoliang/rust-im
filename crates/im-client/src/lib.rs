@@ -9,5 +9,6 @@
 //! - `learning-rust-from-scratch/03-tokio/`：select、channel、超时与取消
 
 pub mod client;
+mod outbox;
 
 pub use client::{run_client, ClientConfig, ClientError, ClientEvent, ClientHandle};
