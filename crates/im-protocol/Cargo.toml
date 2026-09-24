@@ -1,0 +1,18 @@
+[package]
+name = "im-protocol"
+description = "IM 二进制协议：帧编解码、命令字、seq/ack、粘包处理。纯逻辑无 IO 依赖，最易测试"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1"

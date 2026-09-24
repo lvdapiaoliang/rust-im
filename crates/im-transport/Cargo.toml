@@ -1,0 +1,19 @@
+[package]
+name = "im-transport"
+description = "传输层：Tokio TCP 长连接、心跳、断线重连、seq/ack、TLS(rustls)、后期 QUIC(quinn)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

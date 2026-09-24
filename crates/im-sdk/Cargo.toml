@@ -1,0 +1,23 @@
+[package]
+name = "im-sdk"
+description = "FFI SDK：将 Rust IM 内核封装为 C ABI 动态库（.so/.dll/.dylib），供多端调用"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+im-transport.workspace = true
+im-crypto.workspace = true
+im-protocol.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+
+# 阶段 6 将添加 crate-type = ["cdylib"] 输出动态库，
+# 并用 cbindgen 生成 C 头文件、提供 Java(JNI) 调用示例
+[lib]
+name = "im_sdk"

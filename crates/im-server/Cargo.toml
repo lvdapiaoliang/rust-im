@@ -1,0 +1,22 @@
+[package]
+name = "im-server"
+description = "IM 服务端：网关接入、会话路由、消息扇出、离线消息、分布式预留"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+im-protocol.workspace = true
+im-transport.workspace = true
+im-storage.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+
+[[bin]]
+name = "im-server"
+path = "src/main.rs"

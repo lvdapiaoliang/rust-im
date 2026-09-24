@@ -1,0 +1,54 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/im-protocol",
+    "crates/im-transport",
+    "crates/im-crypto",
+    "crates/im-storage",
+    "crates/im-server",
+    "crates/im-client",
+    "crates/im-sdk",
+    "crates/im-bench",
+    "crates/xtask",
+]
+
+# 统一的包元信息：所有 crate 名带 im- 前缀，lib 名用下划线（FFI 输出更友好）
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/lvdapiaoliang/rust-im"
+rust-version = "1.85"
+
+# 统一依赖版本管理：所有 crate 从这里继承，避免版本漂移
+[workspace.dependencies]
+# ---- 内部 crate ----
+im-protocol = { path = "crates/im-protocol" }
+im-transport = { path = "crates/im-transport" }
+im-crypto = { path = "crates/im-crypto" }
+im-storage = { path = "crates/im-storage" }
+im-server = { path = "crates/im-server" }
+im-client = { path = "crates/im-client" }
+im-sdk = { path = "crates/im-sdk" }
+
+# ---- 异步运行时（本项目的性能核心）----
+tokio = { version = "1", features = ["full"] }
+
+# ---- 错误处理 ----
+thiserror = "2"
+anyhow = "1"
+
+# ---- 序列化（协议层用）----
+bytes = "1"
+
+# ---- 测试 ----
+tokio-test = "0.4"
+
+[workspace.lints.rust]
+unsafe_code = "warn" # SDK 层 FFI 需要时再显式允许，其他 crate 默认审视 unsafe
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# 项目里大量使用类型别名增强可读性，允许
+module_name_repetitions = "allow"

@@ -1,0 +1,5 @@
+# 固定工具链：所有协作者与 CI 使用同一版本，保证构建可复现
+# io_uring 相关优化仅在 Linux 生效，但工具链保持统一
+[toolchain]
+channel = "stable"
+profile = "default"

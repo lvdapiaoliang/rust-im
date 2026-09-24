@@ -1,0 +1,22 @@
+[package]
+name = "im-bench"
+description = "压测工具：连接风暴、消息吞吐基准、用户态弱网模拟（延迟/丢包/乱序注入）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+im-protocol.workspace = true
+im-transport.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "im-bench"
+path = "src/main.rs"
