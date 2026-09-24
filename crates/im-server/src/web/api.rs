@@ -246,10 +246,10 @@ pub struct AddMemberReq {
 // 路由
 // ────────────────────────────────────────────────────────────────
 
-/// 组 REST 路由（CORS 全开：开发期 Vite 5173 跨域直连；生产由反向代理同源收口）。
+/// 组 REST + WS 路由（CORS 全开：开发期 Vite 5173 跨域直连；生产由反向代理同源收口）。
 ///
 /// 注：不加 `#[must_use]`——`Router` 自带 `must_use`，叠加会触发
-/// `clippy::double_must_use`。
+/// `clippy::double_must_use`。 WS 不受 CORS 约束（浏览器对 WS 握手不做同源检查）。
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/register", post(register))
@@ -264,6 +264,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/groups/{id}/members", post(add_group_member))
         .route("/api/files", post(upload_file))
         .route("/api/files/{id}", get(download_file))
+        .route("/ws", get(super::ws::ws_handler))
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }

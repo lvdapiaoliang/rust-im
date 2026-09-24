@@ -16,7 +16,8 @@
 //! - [`account`] / [`friends`] / [`groups`] / [`files`]：各域仓储——
 //!   业务语义（状态机、事务、安全取舍）收敛在这里；
 //! - [`api`]：REST 路由与处理器——只做解析/组装/错误映射，不写 SQL；
-//! - WS 网关（JSON 信封 ↔ `Frame` 翻译）在后续子模块落地。
+//! - [`ws`]：WS 网关——JSON 信封 ↔ `Frame` 翻译层 + 会话核心对接
+//!   （鉴权在 HTTP 升级前，握手/消息/同步复用会话层状态机）。
 //!
 //! 与 TCP/TUI 客户端的关系：**双接入并存**。TCP 路径的二进制协议与
 //! [`crate::session`] 逻辑一行不改；WS 路径把 JSON 信封翻译成
@@ -28,6 +29,7 @@ pub mod db;
 pub mod files;
 pub mod friends;
 pub mod groups;
+pub mod ws;
 
 /// `u64` 雪花 ID → `i64`（PG `BIGINT`）：发号器保证 < 2^63。
 ///
