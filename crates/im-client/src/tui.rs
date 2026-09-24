@@ -293,7 +293,7 @@ fn draw_input(f: &mut Frame, view: &Viewport, area: ratatui::layout::Rect, user_
 /// 一条消息渲染成一行：
 /// 出站按状态着色（送达绿/发送中灰/失败红），入站 `< ` 前缀。
 fn render_msg(msg: &ChatMsg) -> Line<'static> {
-    let text = String::from_utf8_lossy(&msg.content).into_owned();
+    let text = display_text(&msg.content);
     if msg.from_me {
         match msg.status {
             SendStatus::Delivered => Line::from(format!("▶ {text}")).fg(Color::Green),
@@ -302,6 +302,37 @@ fn render_msg(msg: &ChatMsg) -> Line<'static> {
         }
     } else {
         Line::from(format!("< {text}"))
+    }
+}
+
+/// 消息内容 → 展示文本（阶段 6 富媒体降级）：
+///
+/// 服务端的 `content` 是不透明字节，Web 端会发 `{"kind":"file"|...}` 对象。
+/// TCP/TUI 只认文本——能解析出 kind 标签就降级为 `[文件] 名字` 形态，
+/// 解析不了按老规矩 lossy 原样展示（降级显示优于丢消息，二进制协议不膨胀）。
+fn display_text(content: &[u8]) -> String {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(content) else {
+        return String::from_utf8_lossy(content).into_owned();
+    };
+    let Some(kind) = value.get("kind").and_then(serde_json::Value::as_str) else {
+        return String::from_utf8_lossy(content).into_owned();
+    };
+    let filename = || value.get("filename").and_then(serde_json::Value::as_str).unwrap_or("");
+    match kind {
+        "text" => value
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        // 表情直接展示（Unicode emoji 在终端里本身就是文本）
+        "emoji" => value
+            .get("emoji")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("[表情]")
+            .to_string(),
+        "image" => format!("[图片] {}", filename()),
+        "file" => format!("[文件] {}", filename()),
+        _ => String::from_utf8_lossy(content).into_owned(),
     }
 }
 
@@ -330,6 +361,28 @@ mod tests {
     fn parse_empty_is_ignored() {
         assert_eq!(parse_input(""), InputAction::Ignored);
         assert_eq!(parse_input("   "), InputAction::Ignored);
+    }
+
+    /// 富媒体降级：纯文本/非 kind JSON 原样展示，kind 对象降级。
+    #[test]
+    fn display_text_degrades_rich_content() {
+        // 纯文本（阶段 4 的原生形态）：原样
+        assert_eq!(display_text(b"hello"), "hello");
+        // JSON 但无 kind 标签：不是内容模型，原样
+        assert_eq!(display_text(br#"{"a":1}"#), r#"{"a":1}"#);
+        // Web 端新形态：text 提取正文
+        assert_eq!(display_text(br#"{"kind":"text","text":"你好"}"#), "你好");
+        // 表情直接展示（终端里 emoji 本就是文本）
+        assert_eq!(display_text(br#"{"kind":"emoji","emoji":"👍"}"#), "👍");
+        // 文件/图片降级为占位提示 + 文件名
+        assert_eq!(
+            display_text(br#"{"kind":"file","file_id":"7","filename":"a.pdf","size_bytes":1}"#),
+            "[文件] a.pdf"
+        );
+        assert_eq!(
+            display_text(br#"{"kind":"image","file_id":"8","filename":"p.png","size_bytes":2}"#),
+            "[图片] p.png"
+        );
     }
 
     /// Tab 轮转：无会话 → None；有会话循环切换。
