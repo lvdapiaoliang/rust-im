@@ -1,12 +1,10 @@
 <script setup lang="ts">
-// 聊天窗：消息流（分类型气泡）+ 输入区（文本/表情/文件）。
+// 聊天窗：消息流（气泡统一交给 MessageBubble 分类型渲染）+ 输入区（文本/表情/文件）。
 // 消息流滚动：新消息到达/切换会话时贴底（用户上翻时不打扰）。
 import { computed, nextTick, ref, watch } from 'vue'
-import { downloadFile } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
-import { parseContent } from '@/types'
-import type { ChatMessage, MessageBody } from '@/types'
+import MessageBubble from '@/components/MessageBubble.vue'
 
 const auth = useAuthStore()
 const chat = useChatStore()
@@ -89,26 +87,6 @@ async function onFileChosen(event: Event): Promise<void> {
 function isMine(from: string): boolean {
   return auth.user?.id === from
 }
-
-/** 气泡主渲染体（按 kind 分发；旧消息字符串已在 parseContent 归一）。 */
-function body(m: ChatMessage): MessageBody {
-  return parseContent(m.content)
-}
-
-/** 人类可读的文件大小。 */
-function fmtSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** 鉴权下载（fetch + blob——a 标签直链带不了 Authorization）。 */
-function download(fileId: string, filename: string): void {
-  void downloadFile(`/api/files/${fileId}`, filename)
-}
-
-/** 上传上限提示（与服务端 MAX_FILE_SIZE 对齐）。 */
-const MAX_HINT = '文件不超过 20 MB'
 </script>
 
 <template>
@@ -128,32 +106,7 @@ const MAX_HINT = '文件不超过 20 MB'
         class="bubble-row"
         :class="{ mine: isMine(m.from) }"
       >
-        <div class="bubble">
-          <!-- 分类型气泡：文本 / 表情（大号）/ 图片 / 文件 -->
-          <template v-if="body(m).kind === 'text'">
-            <div class="text">{{ body(m).text }}</div>
-          </template>
-          <template v-else-if="body(m).kind === 'emoji'">
-            <div class="emoji">{{ body(m).emoji }}</div>
-          </template>
-          <template v-else>
-            <button class="attachment" @click="download(body(m).file_id, body(m).filename)">
-              <span class="file-icon">{{ body(m).kind === 'image' ? '🖼' : '📄' }}</span>
-              <span class="file-meta">
-                <span class="file-name">{{ body(m).filename }}</span>
-                <span class="file-size">{{ fmtSize(body(m).size_bytes) }} · 点击下载</span>
-              </span>
-            </button>
-          </template>
-          <div class="meta">
-            <span v-if="m.status === 'sending'" class="status pending">发送中…</span>
-            <span v-else-if="m.status === 'failed'" class="status failed" :title="m.failReason">
-              发送失败
-            </span>
-            <span v-else class="status ok">已送达</span>
-            <span class="time">{{ new Date(m.ts).toLocaleTimeString() }}</span>
-          </div>
-        </div>
+        <MessageBubble :message="m" />
       </div>
     </div>
 
@@ -162,23 +115,13 @@ const MAX_HINT = '文件不超过 20 MB'
       <div class="composer-row">
         <!-- 表情面板 -->
         <div v-if="emojiOpen" class="emoji-panel">
-          <button
-            v-for="e in EMOJIS"
-            :key="e"
-            class="emoji-cell"
-            @click="sendEmoji(e)"
-          >
+          <button v-for="e in EMOJIS" :key="e" class="emoji-cell" @click="sendEmoji(e)">
             {{ e }}
           </button>
         </div>
         <button class="tool" title="表情" @click="emojiOpen = !emojiOpen">😊</button>
-        <button class="tool" :title="MAX_HINT" @click="pickFile">📎</button>
-        <input
-          ref="fileInput"
-          type="file"
-          class="hidden-input"
-          @change="onFileChosen"
-        />
+        <button class="tool" title="发送文件（不超过 20 MB）" @click="pickFile">📎</button>
+        <input ref="fileInput" type="file" class="hidden-input" @change="onFileChosen" />
         <textarea
           v-model="draft"
           placeholder="输入消息，Enter 发送（Shift+Enter 换行）"
@@ -228,80 +171,9 @@ const MAX_HINT = '文件不超过 20 MB'
   justify-content: flex-end;
 }
 
-.bubble {
-  max-width: 60%;
-  background: #f0f3f7;
-  border-radius: 10px;
-  padding: 8px 12px;
-}
-
-.bubble-row.mine .bubble {
+/* 气泡配色在 MessageBubble 基础上按归属重染 */
+.bubble-row.mine :deep(.bubble) {
   background: #dceaff;
-}
-
-.text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.emoji {
-  font-size: 32px;
-  line-height: 1.4;
-}
-
-.attachment {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 8px;
-  padding: 8px 12px;
-  text-align: left;
-}
-
-.file-icon {
-  font-size: 24px;
-}
-
-.file-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.file-name {
-  font-weight: 500;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-size {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.meta {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-top: 4px;
-}
-
-.status.pending {
-  color: #f5a623;
-}
-
-.status.failed {
-  color: var(--danger);
-}
-
-.status.ok {
-  color: #2ecc71;
 }
 
 .composer {
