@@ -253,6 +253,7 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use im_protocol::Cmd;
+    use tokio::net::TcpListener;
 
     /// 真实 TCP 上的帧往返：write_frame → read_frame
     #[tokio::test]
@@ -310,7 +311,7 @@ mod tests {
     /// 测试脚手架：单连接 echo 服务器（收一帧回一帧）
     struct TcpStreamEchoListener {
         addr: String,
-        handle: tokio::task::JoinHandle<std::io::Result<()>>,
+        handle: tokio::task::JoinHandle<Result<(), TransportError>>,
     }
 
     impl TcpStreamEchoListener {
@@ -320,7 +321,7 @@ mod tests {
             let handle = tokio::spawn(async move {
                 let (stream, _) = listener.accept().await?;
                 let mut conn = Connection::new(stream);
-                let frame = conn.read_frame().await?;
+                let frame = conn.read_frame().await?.expect("应读到一帧");
                 conn.write_frame(&frame).await?;
                 Ok(())
             });
