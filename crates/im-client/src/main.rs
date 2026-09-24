@@ -18,7 +18,12 @@ async fn main() -> anyhow::Result<()> {
     let user_id: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
     let token = args.next().unwrap_or_else(|| "demo".to_string());
 
-    let config = ClientConfig::new(&addr, user_id, &token);
+    let config = ClientConfig {
+        // 持久化到工作目录：聊天历史与重发表重启不丢
+        // （临时目录会随系统清理，不适合真实使用）
+        data_dir: Some(std::path::PathBuf::from("im-client-data")),
+        ..ClientConfig::new(&addr, user_id, &token)
+    };
     println!("im-client: user {user_id} -> {addr}（输入 `to 内容` 发送，Ctrl-C 退出）");
 
     let (events_tx, mut events_rx) = mpsc::channel(64);
@@ -49,6 +54,9 @@ async fn main() -> anyhow::Result<()> {
                 ClientEvent::Rejected { reason } => {
                     println!("[登录被拒：{reason}]");
                     break;
+                }
+                ClientEvent::SendFailed { client_msg_id } => {
+                    println!("[发送失败 client_msg_id={client_msg_id}（重试耗尽）]");
                 }
             }
         }

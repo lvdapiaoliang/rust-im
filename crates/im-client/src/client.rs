@@ -582,8 +582,21 @@ mod tests {
     }
 
     async fn client(addr: SocketAddr, user_id: u64, backoff_base: Duration) -> TestClient {
+        // 每个客户端独立临时目录：本地库互不串味（进程退出后由系统清理）
+        let data_dir = std::env::temp_dir().join(format!(
+            "im-client-test-{}-{}-{}",
+            std::process::id(),
+            user_id,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("系统时钟正常")
+                .as_nanos(),
+        ));
         let config = ClientConfig {
             backoff_base,
+            data_dir: Some(data_dir),
+            // 短 RTO：断线重发的等待不拖慢测试
+            retry_timeout: Duration::from_millis(100),
             ..ClientConfig::new(addr.to_string(), user_id, "any")
         };
         let (events_tx, events_rx) = mpsc::channel(64);
@@ -880,5 +893,94 @@ mod tests {
             next_event(&mut bob.events).await,
             ClientEvent::Ack { .. }
         ));
+    }
+
+    /// 消息级重传：在途消息未被 Ack 时连接死亡，重连后由重发表补发。
+    ///
+    /// 用「拿到服务端连接的关闭开关」人为制造 Ack 丢失：消息确定到达
+    /// 服务端（Alice 已收到）后杀死 Bob 的连接——Ack 是否来得及回不再
+    /// 重要，两种结局都合法且都被断言覆盖（Ack 已到 = 已核销；
+    /// Ack 丢失 = 重连补发后再核销）。
+    #[tokio::test]
+    async fn in_flight_msg_is_retransmitted_after_connection_death() {
+        let sessions = Sessions::new(SessionConfig {
+            authenticator: std::sync::Arc::new(AllowAll),
+            ..SessionConfig::default()
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // 第 2 条连接（Bob）的关闭开关交给测试，其余连接正常服务
+        let (kill_tx, mut kill_rx) = mpsc::channel::<ShutdownTx>(1);
+        tokio::spawn({
+            let sessions = sessions.clone();
+            async move {
+                let mut accepted = 0u32;
+                loop {
+                    let Ok((stream, _)) = listener.accept().await else { continue };
+                    accepted += 1;
+                    let (shutdown_tx, rx) = shutdown_channel();
+                    if accepted == 2 {
+                        let _ = kill_tx.send(shutdown_tx.clone()).await;
+                    }
+                    let sessions = sessions.clone();
+                    let conn_id = sessions.next_conn_id();
+                    // owned clone 满足 'static；shutdown_tx move 进去保活
+                    tokio::spawn(async move {
+                        let _keep_alive = shutdown_tx;
+                        let _ = im_server::serve_connection(
+                            &sessions,
+                            conn_id,
+                            stream,
+                            GatewayConfig::default(),
+                            rx,
+                        )
+                        .await;
+                    });
+                }
+            }
+        });
+
+        let mut alice = client(addr, 1, Duration::from_millis(50)).await;
+        assert!(matches!(
+            next_event(&mut alice.events).await,
+            ClientEvent::Connected { .. }
+        ));
+        let mut bob = client(addr, 2, Duration::from_millis(20)).await;
+        assert!(matches!(
+            next_event(&mut bob.events).await,
+            ClientEvent::Connected { .. }
+        ));
+
+        // 拿到 Bob 首轮连接的关闭开关（服务端已 spawn 该连接）
+        let kill = kill_rx.recv().await.expect("应拿到关闭开关");
+
+        bob.handle
+            .send_msg(1, Bytes::from_static(b"must arrive"))
+            .await
+            .unwrap();
+        // Alice 收到 = 消息确定到达服务端；此刻杀连接，Ack 生死由天
+        let msg = match next_event(&mut alice.events).await {
+            ClientEvent::Message(msg) => msg,
+            other => panic!("Alice 应收到消息，实际 {other:?}"),
+        };
+        assert_eq!(msg.content, Bytes::from_static(b"must arrive"));
+        kill.trigger();
+
+        // Bob 终将收到 Ack：要么断线前已到（已核销），
+        // 要么重连补发后到（二次投递 + 二次 Ack）
+        let mut acked = false;
+        for _ in 0..10 {
+            match next_event(&mut bob.events).await {
+                ClientEvent::Ack { client_msg_id, .. } => {
+                    assert_eq!(client_msg_id, 1, "Bob 的首条消息");
+                    acked = true;
+                    break;
+                }
+                ClientEvent::Disconnected | ClientEvent::Connected { .. } => {}
+                other => panic!("Bob 不应收到 {other:?}"),
+            }
+        }
+        assert!(acked, "重连补发后应收到 Ack");
     }
 }

@@ -66,9 +66,11 @@ impl Inflight {
     }
 }
 
-/// 重发邮箱：持久化重发表 + 内存 RTO 定时器。
+/// 重发邮箱：内存中的在途消息表 + RTO 定时器。
+///
+/// 不持有 [`LocalStore`]：库由连接状态机统一持有，收（入库/游标）
+/// 发（重发表）两侧共用一个实例——每次调用按需借用。
 pub(crate) struct Outbox {
-    store: LocalStore,
     inflight: Vec<Inflight>,
     /// 首次重传等待（RTO）。
     retry_timeout: Duration,
@@ -77,18 +79,17 @@ pub(crate) struct Outbox {
 }
 
 impl Outbox {
-    /// 打开邮箱：加载持久化的重发表——上次退出时未 Ack 的消息，
+    /// 从持久化重发表加载邮箱：上次退出时未 Ack 的消息，
     /// 会在下一次连接建立时被立即补发。
     ///
     /// # Errors
     ///
-    /// 见 [`LocalStore::open`]。
-    pub(crate) fn open(
-        dir: impl AsRef<std::path::Path>,
+    /// 见 [`LocalStore::pending_all`]。
+    pub(crate) fn load(
+        store: &mut LocalStore,
         retry_timeout: Duration,
         retry_max_attempts: u32,
     ) -> Result<Self, StorageError> {
-        let store = LocalStore::open(dir)?;
         let mut inflight = Vec::new();
         for pending in store.pending_all()? {
             inflight.push(Inflight {
@@ -101,7 +102,6 @@ impl Outbox {
             });
         }
         Ok(Self {
-            store,
             inflight,
             retry_timeout,
             retry_max_attempts,
@@ -114,8 +114,13 @@ impl Outbox {
     /// # Errors
     ///
     /// 磁盘写失败时返回 [`StorageError`]。
-    pub(crate) fn enqueue(&mut self, to: u64, content: Bytes) -> Result<Msg, StorageError> {
-        let client_msg_id = self.store.enqueue_outgoing(to, &content)?;
+    pub(crate) fn enqueue(
+        &mut self,
+        store: &mut LocalStore,
+        to: u64,
+        content: Bytes,
+    ) -> Result<Msg, StorageError> {
+        let client_msg_id = store.enqueue_outgoing(to, &content)?;
         self.inflight.push(Inflight {
             client_msg_id,
             to,
@@ -135,6 +140,7 @@ impl Outbox {
     /// 磁盘写失败时返回 [`StorageError`]。
     pub(crate) fn ack(
         &mut self,
+        store: &mut LocalStore,
         client_msg_id: u64,
         msg_id: u64,
         from_me: u64,
@@ -147,7 +153,7 @@ impl Outbox {
             return Ok(()); // 迟到的重复 Ack：早已核销
         };
         let confirmed = self.inflight.remove(pos);
-        self.store.ack_outgoing(
+        store.ack_outgoing(
             client_msg_id,
             msg_id,
             from_me,
@@ -160,16 +166,12 @@ impl Outbox {
     ///
     /// 重复投递对消息层无害（接收端按 `client_msg_id` 去重），
     /// 而新连接上立即补发能把「断线期间的消息延迟」压到一次 RTT。
-    ///
-    /// # Errors
-    ///
-    /// 磁盘读失败时返回 [`StorageError`]。
-    pub(crate) fn resends(&mut self) -> Result<Vec<Msg>, StorageError> {
+    pub(crate) fn resends(&mut self) -> Vec<Msg> {
         let now = Instant::now();
         for msg in &mut self.inflight {
             msg.deadline = now + self.retry_timeout;
         }
-        Ok(self.inflight.iter().map(Inflight::to_msg).collect())
+        self.inflight.iter().map(Inflight::to_msg).collect()
     }
 
     /// 到期重传：遍历在途表，返回（待重发的消息, 已放弃的 `client_msg_id`）。
@@ -180,7 +182,11 @@ impl Outbox {
     /// # Errors
     ///
     /// 磁盘读写失败时返回 [`StorageError`]。
-    pub(crate) fn due(&mut self, now: Instant) -> Result<(Vec<Msg>, Vec<u64>), StorageError> {
+    pub(crate) fn due(
+        &mut self,
+        store: &mut LocalStore,
+        now: Instant,
+    ) -> Result<(Vec<Msg>, Vec<u64>), StorageError> {
         let mut resends = Vec::new();
         let mut failed = Vec::new();
         let mut i = 0;
@@ -194,14 +200,13 @@ impl Outbox {
             if msg.attempts > self.retry_max_attempts {
                 let client_msg_id = msg.client_msg_id;
                 self.inflight.remove(i);
-                self.store.drop_outgoing(client_msg_id)?;
+                store.drop_outgoing(client_msg_id)?;
                 failed.push(client_msg_id);
                 continue;
             }
             msg.deadline = now + backoff_delay(self.retry_timeout, msg.attempts);
             let (client_msg_id, attempts) = (msg.client_msg_id, msg.attempts);
-            self.store
-                .pending_set_attempts(client_msg_id, attempts)?;
+            store.pending_set_attempts(client_msg_id, attempts)?;
             resends.push(msg.to_msg());
             i += 1;
         }
@@ -263,25 +268,29 @@ mod tests {
         }
     }
 
-    fn outbox(dir: &TempDir, rto_ms: u64, max_attempts: u32) -> Outbox {
-        Outbox::open(
-            dir.path(),
+    fn outbox(dir: &TempDir, rto_ms: u64, max_attempts: u32) -> (LocalStore, Outbox) {
+        let mut store = LocalStore::open(dir.path()).expect("本地库应能打开");
+        let outbox = Outbox::load(
+            &mut store,
             Duration::from_millis(rto_ms),
             max_attempts,
         )
-        .expect("邮箱应能打开")
+        .expect("邮箱应能加载");
+        (store, outbox)
     }
 
     /// 生命周期主线：enqueue → Ack 核销 → 转正落盘可查。
     #[test]
     fn ack_confirms_and_persists_message() {
         let dir = TempDir::new();
-        let mut outbox = outbox(&dir, 100, 3);
-        let msg = outbox.enqueue(2, Bytes::from_static(b"hi")).unwrap();
+        let (mut store, mut outbox) = outbox(&dir, 100, 3);
+        let msg = outbox.enqueue(&mut store, 2, Bytes::from_static(b"hi")).unwrap();
         assert_eq!(outbox.len(), 1);
         assert_eq!(msg.client_msg_id, 1, "首个本地 ID 从 1 开始");
 
-        outbox.ack(msg.client_msg_id, 777, 1).unwrap();
+        outbox
+            .ack(&mut store, msg.client_msg_id, 777, 1)
+            .unwrap();
         assert!(outbox.is_empty(), "Ack 后核销");
 
         // 转正落盘：直接重开底层库验证（绕过邮箱，防自说自话）
@@ -297,10 +306,10 @@ mod tests {
     #[test]
     fn duplicate_ack_is_harmless() {
         let dir = TempDir::new();
-        let mut outbox = outbox(&dir, 100, 3);
-        let msg = outbox.enqueue(2, Bytes::from_static(b"once")).unwrap();
-        outbox.ack(msg.client_msg_id, 100, 1).unwrap();
-        outbox.ack(msg.client_msg_id, 100, 1).unwrap(); // 迟到的重复 Ack
+        let (mut store, mut outbox) = outbox(&dir, 100, 3);
+        let msg = outbox.enqueue(&mut store, 2, Bytes::from_static(b"once")).unwrap();
+        outbox.ack(&mut store, msg.client_msg_id, 100, 1).unwrap();
+        outbox.ack(&mut store, msg.client_msg_id, 100, 1).unwrap(); // 迟到的重复 Ack
         assert!(outbox.is_empty());
     }
 
@@ -308,11 +317,13 @@ mod tests {
     #[test]
     fn due_resends_then_reschedules_with_backoff() {
         let dir = TempDir::new();
-        let mut outbox = outbox(&dir, 20, 5);
-        let msg = outbox.enqueue(2, Bytes::from_static(b"retry me")).unwrap();
+        let (mut store, mut outbox) = outbox(&dir, 20, 5);
+        let msg = outbox
+            .enqueue(&mut store, 2, Bytes::from_static(b"retry me"))
+            .unwrap();
 
         std::thread::sleep(Duration::from_millis(30)); // 越过 RTO
-        let (resends, failed) = outbox.due(Instant::now()).unwrap();
+        let (resends, failed) = outbox.due(&mut store, Instant::now()).unwrap();
         assert_eq!(resends.len(), 1, "到期应重发");
         assert!(failed.is_empty());
         assert_eq!(resends[0].client_msg_id, msg.client_msg_id);
@@ -331,16 +342,18 @@ mod tests {
     #[test]
     fn gives_up_after_max_attempts() {
         let dir = TempDir::new();
-        let mut outbox = outbox(&dir, 5, 2);
-        let msg = outbox.enqueue(2, Bytes::from_static(b"hopeless")).unwrap();
+        let (mut store, mut outbox) = outbox(&dir, 5, 2);
+        let msg = outbox
+            .enqueue(&mut store, 2, Bytes::from_static(b"hopeless"))
+            .unwrap();
 
         std::thread::sleep(Duration::from_millis(10));
-        let (resends, failed) = outbox.due(Instant::now()).unwrap();
+        let (resends, failed) = outbox.due(&mut store, Instant::now()).unwrap();
         assert_eq!(resends.len(), 1, "第一次到期：attempt 2，未超上限");
         assert!(failed.is_empty());
 
         std::thread::sleep(Duration::from_millis(20));
-        let (resends, failed) = outbox.due(Instant::now()).unwrap();
+        let (resends, failed) = outbox.due(&mut store, Instant::now()).unwrap();
         assert!(resends.is_empty(), "attempt 3 超上限：不再重发");
         assert_eq!(failed, vec![msg.client_msg_id]);
         assert!(outbox.is_empty());
@@ -355,17 +368,21 @@ mod tests {
     fn reopen_restores_inflight() {
         let dir = TempDir::new();
         let client_msg_id = {
-            let mut outbox = outbox(&dir, 50, 3);
-            let msg = outbox.enqueue(2, Bytes::from_static(b"crash survivor")).unwrap();
+            let (mut store, mut outbox) = outbox(&dir, 50, 3);
+            let msg = outbox
+                .enqueue(&mut store, 2, Bytes::from_static(b"crash survivor"))
+                .unwrap();
             drop(outbox); // 模拟进程退出（消息在途、未 Ack）
             msg.client_msg_id
         };
 
-        let mut outbox = outbox(&dir, 50, 3);
+        let (mut store, mut outbox) = outbox(&dir, 50, 3);
         assert_eq!(outbox.len(), 1, "在途消息重启不丢");
-        let resends = outbox.resends().unwrap();
+        let resends = outbox.resends();
         assert_eq!(resends[0].client_msg_id, client_msg_id);
         assert_eq!(resends[0].content, Bytes::from_static(b"crash survivor"));
+        // 顺手验证 store 借用没有被 drop 影响（借用式 API 无所有权陷阱）
+        assert_eq!(store.sync_cursor().unwrap(), 0);
     }
 
     /// 退避封顶：attempts 很大时延迟不超过 CAP。
