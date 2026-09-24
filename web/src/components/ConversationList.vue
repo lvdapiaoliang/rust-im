@@ -49,7 +49,7 @@ function kindLabel(kind: Conversation['kind']): string {
     </ul>
 
     <p v-if="conversations.length === 0" class="empty">
-      还没有会话：先用 REST 添加好友/建群（管理页阶段 6 上线）
+      还没有会话：去左侧「好友」页添加好友开始聊天
     </p>
   </nav>
 </template>

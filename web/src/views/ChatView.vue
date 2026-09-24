@@ -1,40 +1,29 @@
 <script setup lang="ts">
 // 聊天页：三栏布局（自头像 | 会话列表 | 聊天窗）。
-// 生命周期职责：挂载时拉联系人、连 WS、订阅信封；卸载时全部撤销。
-import { onMounted, onUnmounted, ref } from 'vue'
+// WS 连接与信封订阅在 App.vue（与好友页共享），这里只拉联系人。
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { useWsStore } from '@/stores/ws'
 import { useChatStore } from '@/stores/chat'
 import ConversationList from '@/components/ConversationList.vue'
 import ChatWindow from '@/components/ChatWindow.vue'
 
 const auth = useAuthStore()
-const ws = useWsStore()
 const chat = useChatStore()
 const router = useRouter()
 
 const loadError = ref('')
 
-let unbind: (() => void) | null = null
-
 onMounted(async () => {
-  unbind = chat.bind()
   try {
     await chat.loadContacts()
   } catch {
     loadError.value = '联系人加载失败，请刷新重试'
   }
-  ws.connect()
-})
-
-onUnmounted(() => {
-  unbind?.()
-  ws.disconnect()
 })
 
 function logout(): void {
-  ws.disconnect()
+  // 断连由 App.vue 的 isLoggedIn 监听统一处理（登出 → 断开）
   auth.logout()
   void router.push({ name: 'login' })
 }
@@ -45,6 +34,7 @@ function logout(): void {
     <aside class="me-bar">
       <div class="avatar">{{ auth.user?.display_name?.charAt(0) ?? '?' }}</div>
       <div class="me-name">{{ auth.user?.display_name }}</div>
+      <button class="nav" title="好友管理" @click="router.push({ name: 'friends' })">好友</button>
       <button class="logout" title="登出" @click="logout">退出</button>
     </aside>
 
@@ -93,6 +83,16 @@ function logout(): void {
   font-size: 13px;
   word-break: break-all;
   text-align: center;
+}
+
+.nav {
+  background: none;
+  color: #aab;
+  padding: 4px;
+}
+
+.nav:hover {
+  color: #fff;
 }
 
 .logout {
