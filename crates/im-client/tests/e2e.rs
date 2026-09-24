@@ -100,10 +100,12 @@ async fn online_chat_then_offline_catchup_and_resume() {
     .expect("服务应能启动");
 
     // ── 第 1 幕：在线互发 ──
+    eprintln!("[probe] act1 start");
     let mut alice = login(addr, 1).await;
     let mut bob = login(addr, 2).await;
     expect_connected(&mut alice.events).await;
     expect_connected(&mut bob.events).await;
+    eprintln!("[probe] act1 both connected");
 
     // Alice → Bob：Bob 收到消息、Alice 收到 Ack，msg_id 一致
     alice
@@ -121,6 +123,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
         other => panic!("Alice 应收到 Ack，实际 {other:?}"),
     };
     assert_eq!(ack1, bob_msg.msg_id);
+    eprintln!("[probe] act1 alice acked");
 
     // Bob → Alice：双向都要通
     bob.handle
@@ -143,6 +146,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     // 不等的话下一条消息可能撞上「路由还在、连接将死」的窗口
     // （生产环境靠阶段 4 的 Ack 重发兜底，测试里直接规避）。
     sleep(SETTLE).await;
+    eprintln!("[probe] act2 bob gone, sending offline");
 
     let id1 = send_and_ack(&alice.handle, &mut alice.events, 2, b"offline 1").await;
     let id2 = send_and_ack(&alice.handle, &mut alice.events, 2, b"offline 2").await;
@@ -152,6 +156,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     );
 
     // ── 第 3 幕：Bob 回来，自动补投 + 恢复双向 ──
+    eprintln!("[probe] act3 bob back");
     let mut bob = login(addr, 2).await;
     expect_connected(&mut bob.events).await;
 
