@@ -1,4 +1,4 @@
-//! # echo_demo：阶段 0 可运行示例
+//! # `echo_demo`：阶段 0 可运行示例
 //!
 //! 运行：`cargo run -p im-transport --example echo_demo`
 //!
