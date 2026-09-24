@@ -82,7 +82,7 @@ pub const fn zigzag_encode(v: i64) -> u64 {
 #[allow(clippy::cast_sign_loss)]
 #[must_use]
 pub const fn zigzag_decode(u: u64) -> i64 {
-    ((u >> 1) as i64) ^ -i64::from(u & 1)
+    ((u >> 1) as i64) ^ -((u & 1) as i64)
 }
 
 /// 把有符号数 zigzag + varint 一体编码写入 `dst`，返回写入的字节数。
