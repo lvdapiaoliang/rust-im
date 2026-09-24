@@ -667,6 +667,8 @@ mod tests {
     struct TestClient {
         handle: ClientHandle,
         events: mpsc::Receiver<ClientEvent>,
+        /// 本地库目录（持久化断言用）。
+        data_dir: std::path::PathBuf,
         _shutdown: ShutdownTx,
     }
 
@@ -683,7 +685,7 @@ mod tests {
         ));
         let config = ClientConfig {
             backoff_base,
-            data_dir: Some(data_dir),
+            data_dir: Some(data_dir.clone()),
             // 短 RTO：断线重发的等待不拖慢测试
             retry_timeout: Duration::from_millis(100),
             ..ClientConfig::new(addr.to_string(), user_id, "any")
@@ -694,14 +696,16 @@ mod tests {
         TestClient {
             handle,
             events: events_rx,
+            data_dir,
             _shutdown: shutdown_tx,
         }
     }
 
-    /// 等待下一个事件（断言在 WAIT 内到达）。
+    /// 等待下一个业务事件（断言在 WAIT 内到达）。
     ///
-    /// 每次连接建立后的自动同步会例行产生一个空 `SyncBatch`——
-    /// 那是连接层的噪音而非业务信号，统一在这里跳过；
+    /// 过滤两类「过程噪音」：
+    /// - 每次连接后的例行空 `SyncBatch`（连接层噪音）；
+    /// - `MessageQueued`（发送过程事件，专门的测试覆盖它的顺序）。
     /// 非空批量（离线补投）依然原样上递。
     async fn next_event(events: &mut mpsc::Receiver<ClientEvent>) -> ClientEvent {
         loop {
@@ -711,6 +715,7 @@ mod tests {
                 .expect("客户端存活");
             match event {
                 ClientEvent::SyncBatch(ref batch) if batch.is_empty() => {}
+                ClientEvent::MessageQueued { .. } => {}
                 other => return other,
             }
         }
@@ -1066,10 +1071,77 @@ mod tests {
                     acked = true;
                     break;
                 }
-                ClientEvent::Disconnected | ClientEvent::Connected { .. } => {}
+                ClientEvent::Disconnected
+                | ClientEvent::Connected { .. }
+                | ClientEvent::MessageQueued { .. } => {}
                 other => panic!("Bob 不应收到 {other:?}"),
             }
         }
         assert!(acked, "重连补发后应收到 Ack");
+    }
+
+    /// 事件顺序：发送后先 `MessageQueued`（UI 转圈）后 `Ack`（送达），
+    /// 同一通道保证顺序——UI 状态机依赖这个不变量。
+    #[tokio::test]
+    async fn message_queued_precedes_ack() {
+        let addr = server().await;
+        let mut alice = client(addr, 1, Duration::from_millis(50)).await;
+        assert!(matches!(
+            next_event(&mut alice.events).await,
+            ClientEvent::Connected { .. }
+        ));
+
+        alice
+            .handle
+            .send_msg(2, Bytes::from_static(b"spin then tick"))
+            .await
+            .unwrap();
+        // 不经过 next_event 的过滤：原始事件序列必须先是 MessageQueued
+        match timeout(WAIT, alice.events.recv()).await {
+            Ok(Some(ClientEvent::MessageQueued { client_msg_id, to, .. })) => {
+                assert_eq!(client_msg_id, 1);
+                assert_eq!(to, 2);
+            }
+            other => panic!("第一事件应是 MessageQueued，实际 {other:?}"),
+        }
+        assert!(matches!(
+            next_event(&mut alice.events).await,
+            ClientEvent::Ack { .. }
+        ));
+    }
+
+    /// 收到的消息落盘：直接重开本地库验证（绕过客户端，防自说自话），
+    /// 游标同时推进（重启后只补增量）。
+    #[tokio::test]
+    async fn received_messages_are_persisted() {
+        let addr = server().await;
+        let mut alice = client(addr, 1, Duration::from_millis(50)).await;
+        let mut bob = client(addr, 2, Duration::from_millis(50)).await;
+        assert!(matches!(
+            next_event(&mut alice.events).await,
+            ClientEvent::Connected { .. }
+        ));
+        assert!(matches!(
+            next_event(&mut bob.events).await,
+            ClientEvent::Connected { .. }
+        ));
+
+        bob.handle
+            .send_msg(1, Bytes::from_static(b"persisted please"))
+            .await
+            .unwrap();
+        let msg = match next_event(&mut alice.events).await {
+            ClientEvent::Message(msg) => msg,
+            other => panic!("Alice 应收到消息，实际 {other:?}"),
+        };
+        assert_eq!(msg.content, Bytes::from_static(b"persisted please"));
+
+        // 直接开 Alice 的本地库：消息在历史里，游标已推进
+        let mut store = im_storage::LocalStore::open(&alice.data_dir).unwrap();
+        let history = store.history(2, 10).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].msg_id, msg.msg_id);
+        assert_eq!(history[0].content, Bytes::from_static(b"persisted please"));
+        assert!(store.sync_cursor().unwrap() >= msg.msg_id);
     }
 }

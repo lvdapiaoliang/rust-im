@@ -46,8 +46,8 @@ async fn login(addr: SocketAddr, user_id: u64) -> OnlineClient {
     }
 }
 
-/// 等下一个业务事件：跳过连接建立后自动同步产生的空 `SyncBatch`
-/// （连接层噪音，非业务信号）。
+/// 等下一个业务事件：跳过两类过程噪音——连接后例行空 `SyncBatch`
+/// （连接层噪音）与 `MessageQueued`（发送过程事件）。
 async fn next_event(events: &mut mpsc::Receiver<ClientEvent>) -> ClientEvent {
     loop {
         let event = timeout(WAIT, events.recv())
@@ -56,6 +56,7 @@ async fn next_event(events: &mut mpsc::Receiver<ClientEvent>) -> ClientEvent {
             .expect("客户端存活");
         match event {
             ClientEvent::SyncBatch(ref batch) if batch.is_empty() => {}
+            ClientEvent::MessageQueued { .. } => {}
             other => return other,
         }
     }
