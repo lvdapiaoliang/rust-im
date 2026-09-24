@@ -19,10 +19,10 @@
 //! 「时间戳只前进」上——回拨瞬间若继续发号，会产生比已发 ID 更小的 ID，
 //! 破坏有序性甚至造成重复。策略：
 //!
-//! 1. 回拨量 ≤ [`MAX_BACKWARD_MS`]（容忍 NTP 微调）：**拒绝发号**，让调用方
-//!    稍候重试（等待真实时间追平）；
-//! 2. 回拨量更大：返回 [`SnowflakeError::ClockMovedBackwards`]，
-//!    由运维介入（换 machine_id 或等时钟稳定）。
+//! 1. 回拨量 ≤ [`MAX_BACKWARD_MS`]（容忍 NTP 微调）：错误值携带回拨量，
+//!    调用方可稍候重试（等待真实时间追平）；
+//! 2. 回拨量更大：同样报错但需运维介入（换 machine_id 或等时钟稳定）。
+//!    阈值本身由调用方把握——生成器只负责「拒绝 + 报告回拨量」。
 //!
 //! # 测试策略：注入时钟
 //!
@@ -160,8 +160,11 @@ impl Clock for ManualClock {
 pub struct Snowflake<C: Clock> {
     /// 机器 ID（已校验 ≤ 1023）。
     machine_id: u64,
-    /// 上次发号的毫秒（相对纪元）。
-    last_ms: u64,
+    /// 上次发号的毫秒（相对纪元）；`None` = 尚未发过号。
+    ///
+    /// 用 `Option` 而非 `0` 哨兵：时钟可能恰好停在 0（测试、开机瞬间），
+    /// 哨兵值与真实时间重合会误判「同一毫秒」。
+    last_ms: Option<u64>,
     /// 当前毫秒内已用的序列号。
     sequence: u64,
     /// 时间源（可注入）。
@@ -182,7 +185,7 @@ impl<C: Clock> Snowflake<C> {
         );
         Self {
             machine_id,
-            last_ms: 0,
+            last_ms: None,
             sequence: 0,
             clock,
         }
@@ -197,26 +200,27 @@ impl<C: Clock> Snowflake<C> {
     pub fn next_id(&mut self) -> Result<u64, SnowflakeError> {
         let now = self.clock.now_ms();
 
-        // ── 时钟回拨检查 ──
-        if now < self.last_ms {
-            let backwards = self.last_ms - now;
-            if backwards <= MAX_BACKWARD_MS {
-                // 微量回拨：本毫秒不发号，调用方重试即可
+        match self.last_ms {
+            // ── 时钟回拨检查 ──
+            Some(last) if now < last => {
+                let backwards = last - now;
+                // 无论大小都拒绝发号：错误值携带回拨量，调用方/运维
+                // 依此分辨「稍候重试」还是「人工介入」。
                 return Err(SnowflakeError::ClockMovedBackwards { backwards });
             }
-            return Err(SnowflakeError::ClockMovedBackwards { backwards });
-        }
-
-        if now == self.last_ms {
             // 同一毫秒：序列 +1；耗尽则报错
-            if self.sequence == MAX_SEQUENCE {
-                return Err(SnowflakeError::SequenceExhausted);
+            Some(last) if now == last => {
+                if self.sequence == MAX_SEQUENCE {
+                    return Err(SnowflakeError::SequenceExhausted);
+                }
+                self.sequence += 1;
             }
-            self.sequence += 1;
-        } else {
-            // 新毫秒：序列归零（从 0 开始，避免全 0 ID 与「未发号」混淆）
-            self.last_ms = now;
-            self.sequence = 0;
+            // 新毫秒（或首个 ID）：序列归零（从 0 开始，避免全 0 ID
+            // 与「未发号」混淆）
+            _ => {
+                self.last_ms = Some(now);
+                self.sequence = 0;
+            }
         }
 
         Ok(assemble(now, self.machine_id, self.sequence))
@@ -357,7 +361,19 @@ mod tests {
         for t in 0..THREADS {
             handles.push(std::thread::spawn(move || {
                 let mut sf = Snowflake::new(t, Arc::new(SystemClock));
-                (0..PER_THREAD).map(|_| sf.next_id().unwrap()).collect::<Vec<_>>()
+                (0..PER_THREAD)
+                    .map(|_| loop {
+                        match sf.next_id() {
+                            Ok(id) => break id,
+                            // 单毫秒 4096 个用尽是正常约束：生产方的
+                            // 标准姿势是等到下一毫秒再取号。
+                            Err(SnowflakeError::SequenceExhausted) => {
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                            }
+                            Err(e) => panic!("发号失败: {e}"),
+                        }
+                    })
+                    .collect::<Vec<_>>()
             }));
         }
         for h in handles {

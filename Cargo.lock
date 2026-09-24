@@ -248,9 +248,11 @@ name = "im-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "im-protocol",
  "im-storage",
  "im-transport",
+ "thiserror",
  "tokio",
 ]
 

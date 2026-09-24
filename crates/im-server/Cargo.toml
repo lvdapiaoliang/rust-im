@@ -16,6 +16,8 @@ im-transport.workspace = true
 im-storage.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
+bytes.workspace = true
 
 [[bin]]
 name = "im-server"
