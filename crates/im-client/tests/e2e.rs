@@ -159,6 +159,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     eprintln!("[probe] act3 bob back");
     let mut bob = login(addr, 2).await;
     expect_connected(&mut bob.events).await;
+    eprintln!("[probe] act3 bob connected, waiting sync");
 
     let batch = match next_event(&mut bob.events).await {
         ClientEvent::SyncBatch(messages) => messages,
