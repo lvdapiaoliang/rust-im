@@ -1,7 +1,8 @@
-# 12 - 阶段 5：Web 协议——REST、WS JSON 信封与双传输适配
+# 12 - 阶段 5~6：Web 协议——REST、WS JSON 信封、事件推送与富媒体内容
 
 > 对应代码：`crates/im-server/src/web/`（REST + WS 网关）、`crates/im-server/src/sink.rs`
-> （FrameSink）、`web/`（Vue 前端）
+> （FrameSink，含阶段 6 的 `send_text` 事件直通）、`crates/im-client/src/tui.rs`
+> （富媒体降级显示）、`web/`（Vue 前端，含好友管理页与富媒体气泡）
 > ｜ 前置阅读：`docs/04-protocol-design.md`（二进制协议）、`docs/06-server-arch.md`（会话核心）
 > ｜ 学习配套：`learning-rust-from-scratch/`（trait、适配器模式）
 
@@ -73,6 +74,7 @@ Authorization: Bearer <token>
 | POST /api/friends/requests/{id}/reject | 拒绝 | Bearer |
 | GET /api/friends | 好友列表 | Bearer |
 | DELETE /api/friends/{user_id} | 删除好友 | Bearer |
+| GET /api/users?username=… | 按用户名精确查找（加好友入口，null = 没找到） | Bearer |
 | POST /api/groups | 建群（创建者为 owner） | Bearer |
 | GET /api/groups | 我的群 | Bearer |
 | POST /api/groups/{id}/members | 拉人入群（仅 owner） | Bearer |
@@ -156,7 +158,8 @@ GET /ws?token=<登录令牌>
 | `sync_resp` | 下行 | `{messages: [msg 载荷数组]}` | 离线补投应答（空数组也是事件：确认「没有漏」） |
 | `ping` | 上行 | `{}` | 应用层心跳（浏览器发不了 WS 控制帧） |
 | `pong` | 下行 | `{}`（`seq` 回显 ping 的 seq） | 心跳应答，前端按 seq 配对 |
-| `error` | 下行 | `{code, message}` | 协议错误，**连接不断**（见 4.6） |
+| `error` | 下行 | `{code, message, client_msg_id?}` | 协议错误，**连接不断**（client_msg_id 仅在消息被拒时携带，见 4.6） |
+| `event` | 下行 | `{kind, …}` | 服务端主动事件（好友请求/被接受/被删除等，见 4.7） |
 
 ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
 在信封里同样**一律字符串**；入站宽容接受数字。
@@ -185,13 +188,34 @@ ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
 前端心跳纪律（`web/src/stores/ws.ts`）：30s 一跳，连续 2 次没收到
 配对 pong 即判「半开连接」，主动断开触发重连（指数退避 1s → 15s 封顶）。
 
-### 4.5 content 的不透明语义
+### 4.5 content 的不透明语义与内容模型
 
 服务端对消息内容始终是**不透明字节**：上行把 payload.content 整体
 `serde_json` 序列化成字节存/投递；下行尝试反解成 JSON 值，失败则降级
 `String::from_utf8_lossy` 字符串——**展示降级优于静默吞消息**。
-阶段 6 的内容模型 `{"kind":"text"|"file"|"image"|"emoji", …}`
-天然兼容：对服务端它只是一个会飞的 JSON 值。
+
+阶段 6 在这层不透明字节上约定了内容模型（判别联合，`kind` 是标签）：
+
+```json
+{"kind": "text",  "text": "你好"}
+{"kind": "emoji", "emoji": "👍"}
+{"kind": "image", "file_id": "…", "filename": "p.png", "size_bytes": 1024}
+{"kind": "file",  "file_id": "…", "filename": "a.pdf", "size_bytes": 2048}
+```
+
+| 消费者 | 语义 |
+|---|---|
+| 服务端 | 不解释——只当作会飞的 JSON 值（路由/去重/离线补投都不看内容） |
+| Web 前端 | `parseContent` 归一后按 kind 分发渲染（文本/大号 emoji/可下载附件卡片） |
+| TCP/TUI | 降级显示：`[文件] a.pdf` / `[图片] p.png`（`tui.rs::display_text`）；阶段 5 的旧消息（裸字符串）原样展示 |
+
+这条约定的设计回报：**协议演进不要求核心重写**。阶段 6 没改一行
+会话核心代码，只动了两个「终端」（前端渲染 + TUI 降级）——不透明
+语义把内容演进的成本隔离在了展示层。
+
+富媒体的字节本体不在消息里：文件先走 `POST /api/files` 上传得
+`file_id`，消息只携带元数据；接收方点击时 `GET /api/files/{id}`
+鉴权下载（前端用 fetch + blob——`<a>` 直链带不了 Authorization 头）。
 
 ### 4.6 错误语义：坏信封不断连
 
@@ -199,12 +223,56 @@ ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
 |---|---|---|
 | `bad_envelope` | 文本帧不是合法 JSON / 缺 type | 保持 |
 | `bad_payload` | 业务类型但载荷缺字段（如 msg 没有 to） | 保持 |
+| `not_friend` | 单聊收发双方不是好友（阶段 6 门槛，见 4.8） | 保持 |
 | `welcome.reason = "already online"` | 同账号已在线（注册失败） | 客户端见 reason 即断 |
 | HTTP 401 | 令牌无效/缺失 | 连接未建立 |
 
 「协议错误 ≠ 连接错误」：一条坏消息只该废掉它自己。丢连接是
 断言级事故（对端死了、网络断了），用 `select` 里的 `None`/`Err`/
 `Close` 表达——**错误分级是协议设计的基本功**。
+
+`not_friend` 的载荷额外携带 `client_msg_id`：错误只关乎**这一条**
+发送尝试（不 ack、不入离线），前端据它把对应的乐观消息置为
+`failed`——错误关联到具体对象，而不是弹一个没头没脑的全局提示。
+
+### 4.7 事件信封：服务端主动推送（阶段 6）
+
+好友系统的实时性靠 `event` 信封。它不是翻译层的产物（im-protocol
+没有 Event 命令字——业务事件不该膨胀二进制协议），而是 REST 处理器
+经 `Sessions::push_event` 直通的已组装信封：
+
+| kind | 触发（REST） | 载荷 | 推给谁 |
+|---|---|---|---|
+| `friend_request` | 发起好友请求 | `{request: FriendRequestView}` | 接收方 |
+| `friend_accepted` | 接受请求 | `{user, by}` | 发起方（接受方自己刚点的按钮，不需要） |
+| `friend_removed` | 删除好友 | `{user}` | 被删方 |
+
+三个工程决策值得展开：
+
+- **拒绝不推事件**：拒绝是「没有事情发生」（发起方拉列表才知道）。
+  避免「你的请求被拒」这种伤害性提醒——微信/Telegram 同样如此。
+  产品伦理也是协议语义的一部分；
+- **尽力而为（best-effort）**：接收方离线则放弃（不进离线队列），
+  下次登录拉 REST 列表自然看到。事件是「加速器」不是「真相源」，
+  真相永远在数据库里——这套分工让推送路径可以大胆地简单；
+- **通道能力探测**：`push_event` 要求 sink 实现 `send_text`，
+  TCP 路径的 sink 没有实现（返回 `false`，连接不受影响）。
+  能力即协议——不支持事件推送的传输不会收到它无法表达的信封。
+
+### 4.8 好友门槛：消息权限（阶段 6）
+
+单聊不再是「知道对方 ID 就能发」：`to` 不是群时，收发双方必须是
+好友，服务端在 `dispatch_inbound` 里逐条校验（客户端伪造无效）：
+
+```text
+msg 上行 → to 是群？ ─ 是 → 放行（群聊只要群存在）
+                    └ 否 → is_friend(from, to)？ ─ 是 → 放行
+                                                └ 否 → error(not_friend) 连接不断
+```
+
+代价是每条消息两次主键点查（`is_group` / `is_friend`）——本地回环
+PG 上是微秒级；阶段 7 群 actor 与关系缓存上线后这条路径再优化
+（先正确后快，优化点集中且可测）。
 
 ## 五、双传输对照：同一语义的两种皮肤
 
@@ -231,9 +299,11 @@ SyncReq）下行时返回 `None`（WS 路径不发这种帧，`FrameSink::send`
 | 模式 | 在本阶段的形态 |
 |---|---|
 | **适配器（Adapter）** | 翻译层 + `WsSink`：会话核心面向 `FrameSink` 编程，WS 网关把它适配到浏览器；TCP 的 `ConnectionHandle` 是另一个适配器。**被适配的双方（JSON/二进制）互不知情** |
+| **观察者/发布订阅（Observer/Pub-Sub）** | 阶段 6 的 `event` 信封：REST 层发布、WS 连接订阅（载荷自带 `kind` 子类型——新增事件零协议改动）；前端 ws store 的 `on(type, cb)` 订阅表是同一模式在客户端的镜像 |
 | **仓库模式（Repository）** | `web/account.rs` 等四个仓储：SQL 细节不出仓储，处理器只见领域错误（`AccountError` → `ApiError` 的映射也集中在 web 层）。Java 对照 Spring Data JPA，但无动态代理、无反射 |
 | **策略隐于配置** | REST 的错误映射、WS 的出站容量（64）都是「一处定义、处处生效」的小配置点——策略模式不需要类爆炸也能落地 |
 | **提取器即中间件** | axum 的 `AuthUser`：鉴权逻辑写在类型上，路由表自动套用。对照 Java 的 Filter/Interceptor 链，但顺序由参数类型推导、编译期检查 |
+| **判别联合即内容模型** | `{"kind":"text"|…}` 的标签化 JSON——Rust 的 enum、TS 的字面量联合类型、协议的 content 约定三方同构，跨语言类型安全不需要 IDL |
 
 > 适配器是本阶段最重要的模式：它让「加一种传输」从「重写会话层」
 > 变成「写一个翻译层」。阶段 8 的 WebRTC 信令、阶段 10+ 的 QUIC
@@ -244,8 +314,10 @@ SyncReq）下行时返回 `None`（WS 路径不发这种帧，`FrameSink::send`
 | 层 | 用例 | 数量 |
 |---|---|---|
 | 翻译层单元测试 | msg 信封往返 / content 序列化 / ID 宽容解析 / 未知类型拒绝 / 传输层帧不出站 | 6 |
-| WS 集成（真 HTTP + 真 WS + 真 PG） | 坏令牌升级前 401 / welcome+msg 往返 / 单端登录拒绝 / 断线重连离线补投 / 坏信封存活 | 5 |
-| REST 集成（真 PG） | 注册登录 / 好友全流程 / 群组 / 文件上传下载（multipart 边界） | 39（含全部 web 模块） |
+| WS 集成（真 HTTP + 真 WS + 真 PG） | 坏令牌升级前 401 / welcome+msg 往返 / 单端登录拒绝 / 断线重连离线补投 / 坏信封存活 / **非好友拒发不断连** / **事件推送直达** 等 | 8 |
+| REST 集成（真 PG） | 注册登录 / 好友全流程 / 群组 / 文件上传下载（multipart 边界）/ 用户名查找 | 10 |
+| 会话核心 | `push_event` 三态：文本直达 / TCP 不支持 / 离线放弃 | 1 |
+| TUI 降级 | 纯文本原样 / 无 kind JSON 原样 / text 提取 / emoji 直显 / file/image 降级占位 | 1 |
 | 前端 | `vite build`（vue-tsc 类型检查）通过 | — |
 | 真实进程冒烟 | 起服务端 → 注册 → 登录 → /api/me，验证 ID 串化生效 | 手工 |
 
@@ -264,16 +336,17 @@ WS 集成测试用 `tokio-tungstenite` 做真客户端：不走 `FrameSink` 的
   拒绝）/ 连接中断（select 退出）。三种「失败」发生在三个层次，
   客户端要能分别感知——混为一谈的协议会让前端写出一堆猜谜代码。
 
-## 九、下一步（阶段 6 预告）
+## 九、下一步（阶段 7 预告）
 
-地基已就绪，但「好友」还只是数据库里的两张表：
+社交关系的「一对一」闭环已完成，剩下的另一半是「一对多」：
 
-- 好友请求全流程上线：WS 推送 `friend_request` / `friend_accepted`
-  事件（服务端主动推送的第一批真实场景），**仅好友间可发消息**（服务端校验）；
-- 消息内容模型 `{"kind":"text"|"file"|"image"|"emoji", …}` 在前端落地：
-  表情 picker、文件消息（上传得 fileId → 气泡元数据 → 点击下载）；
-- 服务端 content 依旧不透明——**协议演进不要求核心重写**，这正是
-  不透明语义的设计回报。
+- 群消息扇出：每群一个 actor（成员快照缓存，DB 变更失效），
+  群消息带群内递增 seq——`is_group`/`is_friend` 的每消息点查
+  将被成员快照替换，本阶段欠下的优化债在此偿还；
+- 慢消费者隔离：投递改 `try_send`，队列满按策略丢弃/断开
+  （决策记录进文档）——2 万人在线时不能让一个慢客户端拖垮整群；
+- 压测：im-bench 加群扇出场景（2 万连接、单群消息风暴），
+  量化数据进 docs/13；Vue 群聊界面（成员列表、@提到、入群/退群通知）。
 
 ## 十、面试题与标准回答
 
@@ -315,8 +388,31 @@ API **不允许自定义请求头**——这是平台限制，不是设计偏好
 再配合一次性 ticket（REST 换一次性 ticket，WS 用 ticket 连接）
 把泄漏窗口压到秒级——这是阶段 14 工程化的候选优化项。
 
+**Q5：好友事件为什么不进离线队列？消息丢了不是 bug 吗？**
+
+答：事件和消息的可靠性要求不同。消息是**内容本体**，用户发出去的
+每个字都不能丢，所以要 ack + 离线队列 + 同步补投一整套机制；
+事件是**状态的影子**（「有人请求加你」这个事实在 friend_requests
+表里），推丢了下次拉列表自然看到。把事件也塞进离线队列，等于给
+影子做了本体的可靠性——成本翻倍，收益为零。区分「真相源」和
+「加速器」是推送系统设计的第一刀：真相在数据库，推送只负责快。
+
+**Q6：仅好友可发消息的校验放在服务端，每条消息两次点查会不会太贵？**
+
+答：现在是每条消息一次 `is_group` + 一次 `is_friend` 主键点查，
+本地回环 PG 上微秒级，人手速级的消息频率下完全无感。更重要的是
+**先正确后快**：权限校验必须在服务端（客户端校验只是装饰），
+且现阶段它是集中的一处（dispatch_inbound），可测可换。阶段 7
+群 actor 上线后换成内存成员快照 + 关系缓存，点查消失——优化点
+集中，替换才有边界。
+
 ---
 
 *阶段 5 完成于：FrameSink 传输解耦、sqlx 迁移（7 张表）、REST 十四端点、
 WS 网关（JSON 信封 + 应用层心跳）、Vue 3 前端骨架（登录/会话/聊天 +
-自动重连）；web 模块 50 测试全绿，clippy pedantic 零警告。*
+自动重连）；web 模块测试全绿，clippy pedantic 零警告。*
+
+*阶段 6 完成于：`send_text`/`push_event` 事件通道（尽力而为语义）、
+好友门槛（not_friend 带关联 client_msg_id）、好友全流程事件推送、
+用户名查找、内容模型落地（前端判别联合渲染 + TUI 降级显示）、
+好友管理页/表情 picker/文件消息 UI；im-server 55 测试全绿。*

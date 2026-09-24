@@ -61,7 +61,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 3 | 服务端：会话路由 / 离线补投 / 雪花 ID + 最小客户端 + e2e | `im-server` + `im-client` | 06 | ✅ 已完成 |
 | 4 | 客户端：消息重传 / 本地库 / TUI / 消息同步 | `im-client` + `im-storage` | 07 | ✅ 已完成 |
 | 5 | Web 接入与持久化：FrameSink 解耦 + REST + WS 网关 + PostgreSQL + Vue 前端 | `im-server/src/web` + `web/` | 12 | ✅ 已完成 |
-| 6 | 好友系统全流程 + 富媒体消息（文件 / 表情） | `im-server/src/web` + `web/` | 12 | 未开始 |
+| 6 | 好友系统全流程 + 富媒体消息（文件 / 表情） | `im-server/src/web` + `web/` | 12 | ✅ 已完成 |
 | 7 | 群组 + 2 万人同时在线（群扇出 actor + 慢消费者隔离） | `im-server` + `im-bench` | 13 | 未开始 |
 | 8 | 1对1 音视频 + 远程桌面（WebRTC P2P，WS 信令） | `web/` + `im-server/src/web` | 14 | 未开始 |
 | 9 | 群会议 + 屏幕共享（LiveKit SFU + docker-compose） | `web/` + `im-server/src/web` | 15 | 未开始 |
