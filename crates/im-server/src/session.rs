@@ -201,11 +201,15 @@ impl Sessions {
         self.inner.conn_seq.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    /// 生成全局 ID（`msg_id` / `session_id`），序列耗尽时等下一毫秒重试。
+    /// 生成全局 ID（`msg_id` / `session_id` / 注册用户、群、文件等 DB 主键），
+    /// 序列耗尽时等下一毫秒重试。
+    ///
+    /// 阶段 5 起它兼任持久化层的主键发号器——全系统一套 ID 空间
+    /// （协议层与 DB 的实体可互相引用，无需映射表）。
     ///
     /// 时钟回拨不可恢复（拒绝发号），返回 `None`——调用方应放弃本次
     /// 操作并让客户端超时重试。
-    async fn next_id(&self) -> Option<u64> {
+    pub async fn next_id(&self) -> Option<u64> {
         for _ in 0..ID_RETRY_ATTEMPTS {
             // guard 在块内结束：sleep 跨 await 时不持锁
             let verdict = self.inner.snowflake.lock().expect("雪花锁中毒").next_id();
