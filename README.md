@@ -4,35 +4,55 @@
 
 ## 项目状态
 
-**阶段 0~4 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
-客户端消息级重传 + 自研本地库（LSM 思想）+ ratatui TUI，全链路 e2e 含崩溃重传场景。
+**阶段 0~5 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
+客户端消息级重传 + 自研本地库（LSM 思想）+ ratatui TUI，全链路 e2e 含崩溃重传场景；
+Web 接入与持久化（FrameSink 传输解耦、PostgreSQL + sqlx、axum REST、WS 网关
+JSON 信封协议、Vue 3 前端骨架），TCP/TUI 与 Web 双接入并存。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | 0 | workspace 骨架 + echo 热身 | ✅ |
 | 1 | 二进制协议（帧编解码 / 粘包处理） | ✅ |
-| 2 | 传输层（心跳 / 重连 / seq-ACK / 优雅关闭；TLS 移至阶段 7 前置） | ✅ |
+| 2 | 传输层（心跳 / 重连 / seq-ACK / 优雅关闭；TLS 移至阶段 12 前置） | ✅ |
 | 3 | 服务端（认证 / 会话路由 / 离线补投 / 雪花 ID）+ 最小客户端 | ✅ |
 | 4 | 客户端（消息重传 / 本地库 / TUI / 消息同步） | ✅ |
-| 5 | 压测（10万 → 100万 → 500万连接三级里程碑） | ⬜ |
-| 6 | FFI SDK（C ABI 动态库 / JNI） | ⬜ |
-| 7 | 桌面端（Tauri）+ E2EE（Signal 协议） | ⬜ |
-| 8 | QUIC + 挂载盘（FUSE / WinFsp） | ⬜ |
-| 9 | 开源工程化（CI 矩阵 / 文档站） | ⬜ |
+| 5 | Web 接入与持久化（REST + WS 网关 + PostgreSQL + Vue 前端） | ✅ |
+| 6 | 好友系统全流程 + 富媒体消息（文件 / 表情） | ⬜ |
+| 7 | 群组 + 2 万人同时在线（群扇出 + 慢消费者隔离） | ⬜ |
+| 8 | 1对1 音视频 + 远程桌面（WebRTC P2P） | ⬜ |
+| 9 | 群会议 + 屏幕共享（LiveKit SFU） | ⬜ |
+| 10 | 压测（10万 → 100万 → 500万连接三级里程碑） | ⬜ |
+| 11 | FFI SDK（C ABI 动态库 / JNI） | ⬜ |
+| 12 | 桌面端（Tauri）+ E2EE（Signal 协议） | ⬜ |
+| 13 | QUIC + 挂载盘（FUSE / WinFsp） | ⬜ |
+| 14 | 开源工程化（CI 矩阵 / 文档站） | ⬜ |
+
+> 阶段重排说明：阶段 5~9 新增 Web 接入与社交功能，原压测/FFI/桌面+E2EE/QUIC/
+> 工程化顺延为 10~14，详见 [docs/00-roadmap.md](docs/00-roadmap.md)。
 
 ## 快速开始
+
+前置（Web 功能需要）：PostgreSQL 可达，建库后由 sqlx 迁移自动建表；
+连接串等环境变量见 `crates/im-server/src/main.rs`（`IM_DATABASE_URL` /
+`IM_WEB_ADDR` / `IM_SERVER_ADDR` / `IM_FILES_DIR` 可覆盖）。
 
 ```powershell
 cargo test --workspace        # 全量测试
 cargo clippy --workspace --all-targets   # 静态检查（零警告）
 cargo run -p im-transport --example echo_demo   # 运行阶段 0 示例
-cargo run -p im-server                     # 起服务端（默认 127.0.0.1:8888）
-cargo run -p im-client 127.0.0.1:8888 1 demo    # 起 TUI 客户端
+cargo run -p im-server                     # 起服务端（TCP 127.0.0.1:8888 + Web 127.0.0.1:8080）
+cargo run -p im-client 127.0.0.1:8888 1 demo    # 起 TUI 客户端（TCP 二进制路径）
+
+# Web 前端（另一个终端，Node 18+）
+cd web
+npm install
+npm run dev                  # Vite 开发服务器（5173，代理 /api 与 /ws 到 8080）
 ```
 
 TUI 按键：`/to <user_id>` 新会话 · `Tab` 切换会话 · Enter 发送 ·
 PageUp/Down 翻历史 · `/quit` 或 Esc 退出。本地消息库与重发表持久化在
-`im-client-data/`（重启不丢）。
+`im-client-data/`（重启不丢）。Web 端在浏览器注册/登录后走
+WS JSON 信封协议（见 [docs/12-web-protocol.md](docs/12-web-protocol.md)）。
 
 ## 代码结构
 
@@ -47,6 +67,8 @@ crates/
 ├── im-sdk/        FFI SDK：C ABI 动态库（.so/.dll/.dylib）
 ├── im-bench/      压测：连接风暴、吞吐基准、弱网模拟
 └── xtask/         构建任务：交叉编译、SDK 打包
+
+web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 cargo 成员）
 ```
 
 ## 学习文档
@@ -60,7 +82,8 @@ crates/
 - [05 - 传输层设计](docs/05-network-tokio.md)（阶段 2）
 - [06 - 服务端架构](docs/06-server-arch.md)（阶段 3）
 - [07 - 客户端：消息可靠性、本地库与 TUI](docs/07-client.md)（阶段 4）
-- 08~11 随开发阶段逐步补充
+- [12 - Web 协议：REST、WS JSON 信封与双传输适配](docs/12-web-protocol.md)（阶段 5）
+- 13~19 随开发阶段逐步补充（群扇出 / WebRTC / 会议 / 压测 / FFI / E2EE / QUIC）
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 

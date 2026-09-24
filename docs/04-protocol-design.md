@@ -98,7 +98,7 @@ proptest 失败会自动写入 `proptest-regressions/`，变成永久回归用�
 
 - 编码：零分配路径（`encode_into` 到复用的 `BytesMut`），varint/CRC 全在栈上；
 - 解码：每字节常数时间处理，`Bytes::freeze()` 出帧后克隆零拷贝；
-- 预期单帧编解码 < 200ns（阶段 9 用 criterion 验证，超了再优化）。
+- 预期单帧编解码 < 200ns（阶段 14 工程化时用 criterion 验证，超了再优化）。
 
 ## 六、下一步（阶段 2 预告）
 
