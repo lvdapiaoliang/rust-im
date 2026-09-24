@@ -49,8 +49,7 @@ mod tests {
         let io_err: TransportError = io::Error::new(io::ErrorKind::ConnectionReset, "reset").into();
         assert!(matches!(io_err, TransportError::Io(_)));
 
-        let proto_err: TransportError =
-            ProtocolError::UnknownCommand { got: 0xFF }.into();
+        let proto_err: TransportError = ProtocolError::UnknownCommand { got: 0xFF }.into();
         assert!(matches!(proto_err, TransportError::Protocol(_)));
     }
 

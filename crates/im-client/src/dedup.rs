@@ -28,11 +28,7 @@ pub(crate) struct DedupWindow {
 impl DedupWindow {
     /// 建窗口。容量至少为 1（0 容量等于「什么都记不住」，没有意义）。
     pub(crate) fn new(capacity: usize) -> Self {
-        Self {
-            seen: HashSet::new(),
-            order: VecDeque::new(),
-            capacity: capacity.max(1),
-        }
+        Self { seen: HashSet::new(), order: VecDeque::new(), capacity: capacity.max(1) }
     }
 
     /// 记录并查重：`true` = 第一次见（放行），`false` = 重复（丢弃）。

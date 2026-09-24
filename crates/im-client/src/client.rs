@@ -35,14 +35,14 @@ use bytes::Bytes;
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
 use im_storage::{LocalStore, StorageError};
 use im_transport::{
-    shutdown_channel, spawn_gateway, Backoff, ConnectionHandle, GatewayConfig, HeartbeatPolicy,
-    InboundFrame, ShutdownRx,
+    Backoff, ConnectionHandle, GatewayConfig, HeartbeatPolicy, InboundFrame, ShutdownRx,
+    shutdown_channel, spawn_gateway,
 };
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
-use crate::dedup::{DedupWindow, DEFAULT_CAPACITY as DEFAULT_DEDUP_CAPACITY};
+use crate::dedup::{DEFAULT_CAPACITY as DEFAULT_DEDUP_CAPACITY, DedupWindow};
 use crate::outbox::Outbox;
 
 /// 默认心跳间隔（经验值：明显小于服务端 60s 空闲超时）。
@@ -234,12 +234,7 @@ impl LocalState {
         let mut store = LocalStore::open(dir)?;
         let outbox = Outbox::load(&mut store, retry_timeout, retry_max_attempts)?;
         let cursor = store.sync_cursor()?;
-        Ok(Self {
-            store,
-            outbox,
-            dedup: DedupWindow::new(DEFAULT_DEDUP_CAPACITY),
-            cursor,
-        })
+        Ok(Self { store, outbox, dedup: DedupWindow::new(DEFAULT_DEDUP_CAPACITY), cursor })
     }
 
     /// 入一条收到的消息：去重 → 落盘 → 游标推进。
@@ -325,13 +320,11 @@ async fn client_loop(
                 .as_nanos(),
         ))
     });
-    let mut local =
-        LocalState::open(&dir, config.retry_timeout, config.retry_max_attempts)
-            .expect("本地消息库应能打开");
+    let mut local = LocalState::open(&dir, config.retry_timeout, config.retry_max_attempts)
+        .expect("本地消息库应能打开");
 
     loop {
-        let outcome =
-            connect_once(&config, &events, &mut cmd_rx, &shutdown, &mut local).await;
+        let outcome = connect_once(&config, &events, &mut cmd_rx, &shutdown, &mut local).await;
 
         match outcome {
             Outcome::Rejected(reason) => {
@@ -369,9 +362,7 @@ async fn connect_once(
 
     // 2. 网关（客户端角色：心跳保活、写 actor、空闲超时）
     let gateway_config = GatewayConfig {
-        heartbeat: HeartbeatPolicy::Client {
-            interval: config.heartbeat_interval,
-        },
+        heartbeat: HeartbeatPolicy::Client { interval: config.heartbeat_interval },
         ..GatewayConfig::default()
     };
     let (frame_tx, mut frame_rx) = mpsc::channel::<InboundFrame>(32);
@@ -380,16 +371,9 @@ async fn connect_once(
     // 3. 握手（上行 seq 每轮从 1 重新开始——服务端去重窗口以首帧为基准，
     //    不依赖跨连接的 seq 连续性）
     let mut send_seq: u64 = 0;
-    let handshake = Handshake {
-        user_id: config.user_id,
-        token: config.token.clone(),
-    };
+    let handshake = Handshake { user_id: config.user_id, token: config.token.clone() };
     send_seq += 1;
-    if handle
-        .send(handshake.encode_frame(send_seq, 0))
-        .await
-        .is_err()
-    {
+    if handle.send(handshake.encode_frame(send_seq, 0)).await.is_err() {
         let _ = gateway_task.await;
         return Outcome::Disconnected;
     }
@@ -409,11 +393,7 @@ async fn connect_once(
         return Outcome::Rejected(ack.reason);
     }
     let session_id = ack.session_id;
-    if events
-        .send(ClientEvent::Connected { session_id })
-        .await
-        .is_err()
-    {
+    if events.send(ClientEvent::Connected { session_id }).await.is_err() {
         // 业务层不在了：客户端没有存在意义
         finish_gateway(local_shutdown_tx, gateway_task).await;
         return Outcome::Stopped;
@@ -640,7 +620,7 @@ async fn finish_gateway(
 mod tests {
     use super::*;
     use im_server::{AllowAll, SessionConfig, Sessions};
-    use im_transport::{shutdown_channel, ShutdownTx};
+    use im_transport::{ShutdownTx, shutdown_channel};
     use std::net::SocketAddr;
     use tokio::time::timeout;
 
@@ -652,13 +632,12 @@ mod tests {
     /// 局部的 `shutdown_tx` 会被 drop——服务端会立即退场。泄漏这一份 sender
     /// 保活（`watch::Sender` 极小，测试进程内泄漏无害）。
     async fn server() -> SocketAddr {
-        let (addr, _sessions, shutdown) =
-            im_server::spawn_server(SessionConfig {
-                authenticator: std::sync::Arc::new(AllowAll),
-                ..SessionConfig::default()
-            })
-            .await
-            .expect("服务应能启动");
+        let (addr, _sessions, shutdown) = im_server::spawn_server(SessionConfig {
+            authenticator: std::sync::Arc::new(AllowAll),
+            ..SessionConfig::default()
+        })
+        .await
+        .expect("服务应能启动");
         std::mem::forget(shutdown);
         addr
     }
@@ -693,12 +672,7 @@ mod tests {
         let (events_tx, events_rx) = mpsc::channel(64);
         let (shutdown_tx, shutdown_rx) = shutdown_channel();
         let handle = run_client(config, events_tx, shutdown_rx).await;
-        TestClient {
-            handle,
-            events: events_rx,
-            data_dir,
-            _shutdown: shutdown_tx,
-        }
+        TestClient { handle, events: events_rx, data_dir, _shutdown: shutdown_tx }
     }
 
     /// 等待下一个业务事件（断言在 WAIT 内到达）。
@@ -710,10 +684,8 @@ mod tests {
     /// 非空批量（离线补投）依然原样上递。
     async fn next_event(events: &mut mpsc::Receiver<ClientEvent>) -> ClientEvent {
         loop {
-            let event = timeout(WAIT, events.recv())
-                .await
-                .expect("2s 内应收到事件")
-                .expect("客户端存活");
+            let event =
+                timeout(WAIT, events.recv()).await.expect("2s 内应收到事件").expect("客户端存活");
             match event {
                 ClientEvent::SyncBatch(ref batch) if batch.is_empty() => {}
                 ClientEvent::MessageQueued { .. } => {}
@@ -730,21 +702,11 @@ mod tests {
         let mut bob = client(addr, 2, Duration::from_millis(50)).await;
 
         // 双方都握手成功
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Connected { .. }
-        ));
-        assert!(matches!(
-            next_event(&mut bob.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Connected { .. }));
+        assert!(matches!(next_event(&mut bob.events).await, ClientEvent::Connected { .. }));
 
         // Alice → Bob
-        alice
-            .handle
-            .send_msg(2, Bytes::from_static(b"hello from alice"))
-            .await
-            .unwrap();
+        alice.handle.send_msg(2, Bytes::from_static(b"hello from alice")).await.unwrap();
 
         let bob_msg = match next_event(&mut bob.events).await {
             ClientEvent::Message(msg) => msg,
@@ -760,10 +722,7 @@ mod tests {
         assert_eq!(ack, bob_msg.msg_id);
 
         // Bob → Alice（双向都要通）
-        bob.handle
-            .send_msg(1, Bytes::from_static(b"hi alice"))
-            .await
-            .unwrap();
+        bob.handle.send_msg(1, Bytes::from_static(b"hi alice")).await.unwrap();
         let alice_msg = match next_event(&mut alice.events).await {
             ClientEvent::Message(msg) => msg,
             other => panic!("Alice 应收到消息，实际 {other:?}"),
@@ -777,28 +736,15 @@ mod tests {
     async fn offline_messages_sync_on_connect() {
         let addr = server().await;
         let mut alice = client(addr, 1, Duration::from_millis(50)).await;
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Connected { .. }));
 
         // B 未上线：消息进离线队列
-        alice
-            .handle
-            .send_msg(2, Bytes::from_static(b"while you were away"))
-            .await
-            .unwrap();
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Ack { .. }
-        ));
+        alice.handle.send_msg(2, Bytes::from_static(b"while you were away")).await.unwrap();
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Ack { .. }));
 
         // B 上线：Connected 之后应收到 SyncBatch 补投
         let mut bob = client(addr, 2, Duration::from_millis(50)).await;
-        assert!(matches!(
-            next_event(&mut bob.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut bob.events).await, ClientEvent::Connected { .. }));
         let batch = match next_event(&mut bob.events).await {
             ClientEvent::SyncBatch(messages) => messages,
             other => panic!("Bob 应收到离线补投，实际 {other:?}"),
@@ -868,10 +814,7 @@ mod tests {
         assert_ne!(connected, 0);
 
         // 重连成功后收发仍然可用
-        bob.handle
-            .send_msg(1, Bytes::from_static(b"back online"))
-            .await
-            .unwrap();
+        bob.handle.send_msg(1, Bytes::from_static(b"back online")).await.unwrap();
         let ack = match next_event(&mut bob.events).await {
             ClientEvent::Ack { msg_id, .. } => msg_id,
             other => panic!("重连后应能发消息，实际 {other:?}"),
@@ -955,10 +898,7 @@ mod tests {
 
         // 先起一个在线的 Alice 接收
         let mut alice = client(addr, 1, Duration::from_millis(50)).await;
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Connected { .. }));
 
         let mut bob = client(addr, 2, Duration::from_millis(20)).await;
         // 第一轮：闪断（Disconnected）
@@ -967,16 +907,10 @@ mod tests {
             other => panic!("首个事件应是断线，实际 {other:?}"),
         }
         // 断线期间排队一条消息
-        bob.handle
-            .send_msg(1, Bytes::from_static(b"queued while offline"))
-            .await
-            .unwrap();
+        bob.handle.send_msg(1, Bytes::from_static(b"queued while offline")).await.unwrap();
 
         // 重连成功
-        assert!(matches!(
-            next_event(&mut bob.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut bob.events).await, ClientEvent::Connected { .. }));
 
         // Alice 应收到排队的消息；Bob 收到它的 Ack
         let msg = match next_event(&mut alice.events).await {
@@ -984,10 +918,7 @@ mod tests {
             other => panic!("Alice 应收到排队的消息，实际 {other:?}"),
         };
         assert_eq!(msg.content, Bytes::from_static(b"queued while offline"));
-        assert!(matches!(
-            next_event(&mut bob.events).await,
-            ClientEvent::Ack { .. }
-        ));
+        assert!(matches!(next_event(&mut bob.events).await, ClientEvent::Ack { .. }));
     }
 
     /// 消息级重传：在途消息未被 Ack 时连接死亡，重连后由重发表补发。
@@ -1037,23 +968,14 @@ mod tests {
         });
 
         let mut alice = client(addr, 1, Duration::from_millis(50)).await;
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Connected { .. }));
         let mut bob = client(addr, 2, Duration::from_millis(20)).await;
-        assert!(matches!(
-            next_event(&mut bob.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut bob.events).await, ClientEvent::Connected { .. }));
 
         // 拿到 Bob 首轮连接的关闭开关（服务端已 spawn 该连接）
         let kill = kill_rx.recv().await.expect("应拿到关闭开关");
 
-        bob.handle
-            .send_msg(1, Bytes::from_static(b"must arrive"))
-            .await
-            .unwrap();
+        bob.handle.send_msg(1, Bytes::from_static(b"must arrive")).await.unwrap();
         // Alice 收到 = 消息确定到达服务端；此刻杀连接，Ack 生死由天
         let msg = match next_event(&mut alice.events).await {
             ClientEvent::Message(msg) => msg,
@@ -1087,16 +1009,9 @@ mod tests {
     async fn message_queued_precedes_ack() {
         let addr = server().await;
         let mut alice = client(addr, 1, Duration::from_millis(50)).await;
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Connected { .. }));
 
-        alice
-            .handle
-            .send_msg(2, Bytes::from_static(b"spin then tick"))
-            .await
-            .unwrap();
+        alice.handle.send_msg(2, Bytes::from_static(b"spin then tick")).await.unwrap();
         // 不经过 next_event 的过滤：原始事件序列必须先是 MessageQueued
         match timeout(WAIT, alice.events.recv()).await {
             Ok(Some(ClientEvent::MessageQueued { client_msg_id, to, .. })) => {
@@ -1105,10 +1020,7 @@ mod tests {
             }
             other => panic!("第一事件应是 MessageQueued，实际 {other:?}"),
         }
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Ack { .. }
-        ));
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Ack { .. }));
     }
 
     /// 收到的消息落盘：直接重开本地库验证（绕过客户端，防自说自话），
@@ -1118,19 +1030,10 @@ mod tests {
         let addr = server().await;
         let mut alice = client(addr, 1, Duration::from_millis(50)).await;
         let mut bob = client(addr, 2, Duration::from_millis(50)).await;
-        assert!(matches!(
-            next_event(&mut alice.events).await,
-            ClientEvent::Connected { .. }
-        ));
-        assert!(matches!(
-            next_event(&mut bob.events).await,
-            ClientEvent::Connected { .. }
-        ));
+        assert!(matches!(next_event(&mut alice.events).await, ClientEvent::Connected { .. }));
+        assert!(matches!(next_event(&mut bob.events).await, ClientEvent::Connected { .. }));
 
-        bob.handle
-            .send_msg(1, Bytes::from_static(b"persisted please"))
-            .await
-            .unwrap();
+        bob.handle.send_msg(1, Bytes::from_static(b"persisted please")).await.unwrap();
         let msg = match next_event(&mut alice.events).await {
             ClientEvent::Message(msg) => msg,
             other => panic!("Alice 应收到消息，实际 {other:?}"),

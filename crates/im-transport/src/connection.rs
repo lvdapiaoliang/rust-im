@@ -21,10 +21,10 @@ use std::collections::VecDeque;
 use std::net::SocketAddr;
 
 use bytes::BytesMut;
-use im_protocol::{Frame, FrameDecoder, DEFAULT_MAX_FRAME_LEN};
+use im_protocol::{DEFAULT_MAX_FRAME_LEN, Frame, FrameDecoder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use crate::error::TransportError;
 
@@ -146,10 +146,7 @@ impl Connection {
                 read_buf: self.read_buf,
                 pending: self.pending,
             },
-            WriteHalf {
-                stream: write,
-                write_buf: self.write_buf,
-            },
+            WriteHalf { stream: write, write_buf: self.write_buf },
         )
     }
 

@@ -45,8 +45,8 @@ use std::time::Duration;
 
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
 use im_transport::{
-    run_gateway_connection, shutdown_channel, ConnectionHandle, DedupWindow, GatewayConfig,
-    InboundFrame, ShutdownRx, ShutdownTx, TransportError, Verdict,
+    ConnectionHandle, DedupWindow, GatewayConfig, InboundFrame, ShutdownRx, ShutdownTx,
+    TransportError, Verdict, run_gateway_connection, shutdown_channel,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -126,9 +126,7 @@ impl Default for SessionConfig {
             machine_id: 1,
             max_offline_per_user: DEFAULT_MAX_OFFLINE_PER_USER,
             sync_batch_size: DEFAULT_SYNC_BATCH,
-            authenticator: Arc::new(StaticToken {
-                token: "demo".to_string(),
-            }),
+            authenticator: Arc::new(StaticToken { token: "demo".to_string() }),
         }
     }
 }
@@ -208,12 +206,7 @@ impl Sessions {
     async fn next_id(&self) -> Option<u64> {
         for _ in 0..ID_RETRY_ATTEMPTS {
             // guard 在块内结束：sleep 跨 await 时不持锁
-            let verdict = self
-                .inner
-                .snowflake
-                .lock()
-                .expect("雪花锁中毒")
-                .next_id();
+            let verdict = self.inner.snowflake.lock().expect("雪花锁中毒").next_id();
             match verdict {
                 Ok(id) => return Some(id),
                 Err(SnowflakeError::SequenceExhausted) => {
@@ -236,11 +229,8 @@ impl Sessions {
         conn_id: u64,
         handle: ConnectionHandle,
     ) -> Result<(), RouterError> {
-        let session_handle = SessionHandle {
-            conn_id,
-            send_seq: Arc::new(AtomicU64::new(0)),
-            handle,
-        };
+        let session_handle =
+            SessionHandle { conn_id, send_seq: Arc::new(AtomicU64::new(0)), handle };
         self.inner.router.register(user_id, session_handle)
     }
 
@@ -266,12 +256,7 @@ impl Sessions {
     /// 离线表锁中毒时 panic。
     #[must_use]
     pub fn offline_count(&self, user_id: u64) -> usize {
-        self.inner
-            .offline
-            .lock()
-            .expect("离线表锁中毒")
-            .get(&user_id)
-            .map_or(0, VecDeque::len)
+        self.inner.offline.lock().expect("离线表锁中毒").get(&user_id).map_or(0, VecDeque::len)
     }
 
     /// 投递一条消息：在线则转发到接收者连接，否则（离线或投递失败）
@@ -352,11 +337,7 @@ struct SessionState {
 
 impl SessionState {
     fn new() -> Self {
-        Self {
-            user: None,
-            send_seq: 0,
-            dedup: None,
-        }
+        Self { user: None, send_seq: 0, dedup: None }
     }
 
     /// 喂入一帧的 seq，返回去重判定。
@@ -412,8 +393,7 @@ pub async fn serve_connection(
 ) -> Result<(), TransportError> {
     // 网关 → 会话 task 的本地通道（与外界无涉，容量即反压点）
     let (frame_tx, mut frame_rx) = mpsc::channel::<InboundFrame>(SESSION_CHANNEL_CAPACITY);
-    let gateway =
-        tokio::spawn(run_gateway_connection(stream, gateway_config, frame_tx, shutdown));
+    let gateway = tokio::spawn(run_gateway_connection(stream, gateway_config, frame_tx, shutdown));
 
     let mut state = SessionState::new();
 
@@ -422,7 +402,7 @@ pub async fn serve_connection(
         // seq 去重：应用层重发/乱序在进入业务前就被挡下
         match state.feed_seq(event.frame.seq) {
             Verdict::Duplicate | Verdict::TooFar { .. } => continue, // 丢弃
-            Verdict::InOrder | Verdict::OutOfOrder => {}               // 上递
+            Verdict::InOrder | Verdict::OutOfOrder => {}             // 上递
         }
         handle_frame(sessions, &mut state, conn_id, event).await;
     }
@@ -435,9 +415,7 @@ pub async fn serve_connection(
     }
 
     // 连接生命周期的权威结论来自网关
-    gateway
-        .await
-        .expect("网关 task 不应 panic")
+    gateway.await.expect("网关 task 不应 panic")
 }
 
 /// 业务帧分发：握手 / 消息 / 同步三正餐，其余忽略。
@@ -499,10 +477,7 @@ async fn handle_handshake(
         return;
     };
 
-    let ack = if sessions
-        .register(hs.user_id, conn_id, handle.clone())
-        .is_err()
-    {
+    let ack = if sessions.register(hs.user_id, conn_id, handle.clone()).is_err() {
         HandshakeAck::rejected("already online") // 单端登录：顶不掉旧连接
     } else {
         state.user = Some(hs.user_id);
@@ -544,10 +519,7 @@ async fn handle_msg(
 
     // 消息级确认：`msg_id` 供排序/同步游标，`client_msg_id` 供发送方
     // 核销重发表（重发会换新 `msg_id`，只有客户端键跨重发稳定）
-    let ack = MsgAck {
-        msg_id,
-        client_msg_id: upstream.client_msg_id,
-    };
+    let ack = MsgAck { msg_id, client_msg_id: upstream.client_msg_id };
     let _ = reply(state, handle, &ack).await;
 }
 
@@ -649,7 +621,7 @@ mod tests {
     struct TestClient {
         conn: Connection,
         seq: u64,
-        /// 本地去重键计数器（模拟真实客户端的 client_msg_id 生成器）。
+        /// 本地去重键计数器（模拟真实客户端的 `client_msg_id` 生成器）。
         client_msg_id: u64,
     }
 
@@ -683,10 +655,7 @@ mod tests {
 
         /// 握手并返回应答。
         async fn handshake(&mut self, user_id: u64, token: &str) -> HandshakeAck {
-            let hs = Handshake {
-                user_id,
-                token: token.to_string(),
-            };
+            let hs = Handshake { user_id, token: token.to_string() };
             let frame = hs.encode_frame(self.next_seq(), 0);
             self.send(&frame).await;
             self.recv().await
@@ -717,9 +686,7 @@ mod tests {
         /// 断言一小段时间内没有任何帧到达。
         async fn expect_silence(&mut self) {
             assert!(
-                timeout(Duration::from_millis(300), self.conn.read_frame())
-                    .await
-                    .is_err(),
+                timeout(Duration::from_millis(300), self.conn.read_frame()).await.is_err(),
                 "不应有任何回帧"
             );
         }
@@ -745,11 +712,7 @@ mod tests {
 
         let ack = alice.handshake(1, "wrong").await;
         assert!(!ack.is_accepted());
-        assert!(
-            ack.reason.contains("credentials"),
-            "原因应可读: {}",
-            ack.reason
-        );
+        assert!(ack.reason.contains("credentials"), "原因应可读: {}", ack.reason);
         assert_eq!(sessions.online_count(), 0, "拒绝登录不占路由");
     }
 
@@ -763,11 +726,7 @@ mod tests {
         assert!(first.handshake(7, "t").await.is_accepted());
         let ack = second.handshake(7, "t").await;
         assert!(!ack.is_accepted());
-        assert!(
-            ack.reason.contains("already online"),
-            "原因应可读: {}",
-            ack.reason
-        );
+        assert!(ack.reason.contains("already online"), "原因应可读: {}", ack.reason);
         assert_eq!(sessions.online_count(), 1, "只有旧连接在线");
     }
 
@@ -811,10 +770,7 @@ mod tests {
         assert!(bob.handshake(2, "t").await.is_accepted());
         let resp = bob.sync(0).await;
         assert_eq!(resp.messages.len(), 1);
-        assert_eq!(
-            resp.messages[0].content,
-            Bytes::from_static(b"offline-hello")
-        );
+        assert_eq!(resp.messages[0].content, Bytes::from_static(b"offline-hello"));
         assert_eq!(resp.messages[0].from, 1);
         assert_eq!(resp.messages[0].msg_id, ack.msg_id, "离线的 msg_id 与 Ack 一致");
 
@@ -867,12 +823,8 @@ mod tests {
     /// 离线队列有界：超限丢最老的，登录后只能同步到最新 N 条。
     #[tokio::test]
     async fn offline_queue_is_bounded() {
-        let config = SessionConfig {
-            max_offline_per_user: 3,
-            ..test_config()
-        };
-        let (addr, _sessions, _shutdown) =
-            spawn_server(config).await.expect("服务应能启动");
+        let config = SessionConfig { max_offline_per_user: 3, ..test_config() };
+        let (addr, _sessions, _shutdown) = spawn_server(config).await.expect("服务应能启动");
 
         let mut alice = TestClient::connect(addr).await;
         assert!(alice.handshake(1, "t").await.is_accepted());
@@ -891,10 +843,7 @@ mod tests {
         // 丢最老：内容是 m2、m3、m4，且 msg_id 升序
         assert_eq!(resp.messages[0].content, Bytes::from_static(b"m2"));
         assert_eq!(resp.messages[2].content, Bytes::from_static(b"m4"));
-        assert!(
-            resp.messages[0].msg_id < resp.messages[2].msg_id,
-            "离线队列按 msg_id 升序"
-        );
+        assert!(resp.messages[0].msg_id < resp.messages[2].msg_id, "离线队列按 msg_id 升序");
     }
 
     /// 断连收尾：连接死亡后路由被注销（带 `conn_id` 校验），
@@ -944,4 +893,3 @@ mod tests {
         assert!(resp.messages[1].msg_id < resp.messages[2].msg_id);
     }
 }
-

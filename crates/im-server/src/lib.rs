@@ -15,7 +15,7 @@ pub mod snowflake;
 
 pub use router::{Router, RouterError};
 pub use session::{
-    serve, serve_connection, spawn_server, AllowAll, Authenticator, SessionConfig, SessionHandle,
-    Sessions, StaticToken, DEFAULT_MAX_OFFLINE_PER_USER, DEFAULT_SYNC_BATCH,
+    AllowAll, Authenticator, DEFAULT_MAX_OFFLINE_PER_USER, DEFAULT_SYNC_BATCH, SessionConfig,
+    SessionHandle, Sessions, StaticToken, serve, serve_connection, spawn_server,
 };
 pub use snowflake::{Snowflake, SnowflakeError, SystemClock};

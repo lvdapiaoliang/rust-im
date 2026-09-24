@@ -70,12 +70,7 @@ impl Backoff {
     #[must_use]
     pub fn new(base: Duration, max: Duration) -> Self {
         assert!(!base.is_zero(), "base 必须为正：零间隔退避 = 重连风暴");
-        Self {
-            base,
-            max,
-            attempt: 0,
-            rng: seed_from_system(),
-        }
+        Self { base, max, attempt: 0, rng: seed_from_system() }
     }
 
     /// 记录一次失败并返回本次应等待的时长（含 jitter）。
@@ -133,12 +128,13 @@ impl Backoff {
 
 /// 从系统时钟播种（纳秒精度足够 IM 场景的 jitter；不是密码学随机）。
 fn seed_from_system() -> u64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0x9E37_79B9_7F4A_7C15, |d| {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(
+        0x9E37_79B9_7F4A_7C15,
+        |d| {
             // 秒与亚秒纳秒混合：两进程同时启动也有大概率不同种子
             u64::from(d.subsec_nanos()) ^ d.as_secs()
-        });
+        },
+    );
     nanos | 1 // xorshift 状态不能为 0
 }
 

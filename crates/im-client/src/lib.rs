@@ -15,4 +15,4 @@ mod outbox;
 pub mod tui;
 
 pub use chat::{ChatMsg, ChatState, Conversation, SendStatus};
-pub use client::{run_client, ClientConfig, ClientError, ClientEvent, ClientHandle};
+pub use client::{ClientConfig, ClientError, ClientEvent, ClientHandle, run_client};

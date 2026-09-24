@@ -40,7 +40,7 @@ pub mod frame;
 pub mod payload;
 pub mod varint;
 
-pub use codec::{FrameDecoder, DEFAULT_MAX_FRAME_LEN};
+pub use codec::{DEFAULT_MAX_FRAME_LEN, FrameDecoder};
 pub use error::ProtocolError;
 pub use frame::{Cmd, Frame};
 pub use payload::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};

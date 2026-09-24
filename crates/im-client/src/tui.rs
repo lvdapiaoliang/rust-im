@@ -40,15 +40,15 @@
 use bytes::Bytes;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
-use ratatui::Frame;
 use tokio::sync::mpsc;
 
 use crate::chat::{ChatMsg, ChatState, SendStatus};
-use crate::client::{run_client, ClientConfig, ClientEvent, ClientHandle};
+use crate::client::{ClientConfig, ClientEvent, ClientHandle, run_client};
 
 /// TUI 入口：起客户端 + 跑界面循环，退出时恢复终端并关停客户端。
 ///
@@ -98,9 +98,7 @@ fn parse_input(line: &str) -> InputAction {
             _ => InputAction::Ignored,
         };
     }
-    InputAction::Send {
-        content: line.to_string(),
-    }
+    InputAction::Send { content: line.to_string() }
 }
 
 /// TUI 本地状态（不属于 [`ChatState`] 的「视口」部分）。
@@ -226,18 +224,17 @@ fn next_peer(chat: &ChatState, current: Option<u64>) -> Option<u64> {
     }
     let next = match current {
         None => peers[0],
-        Some(cur) => peers
-            .iter()
-            .position(|p| *p == cur)
-            .map_or(peers[0], |i| peers[(i + 1) % peers.len()]),
+        Some(cur) => {
+            peers.iter().position(|p| *p == cur).map_or(peers[0], |i| peers[(i + 1) % peers.len()])
+        }
     };
     Some(next)
 }
 
 /// 一轮完整渲染（纯函数：只读状态、只画）。
 fn draw(f: &mut Frame, chat: &ChatState, view: &Viewport, user_id: u64) {
-    let [sidebar, main] = Layout::horizontal([Constraint::Length(22), Constraint::Min(0)])
-        .areas(f.area());
+    let [sidebar, main] =
+        Layout::horizontal([Constraint::Length(22), Constraint::Min(0)]).areas(f.area());
     let [messages_area, input_area] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(main);
 
@@ -261,25 +258,19 @@ fn draw_sidebar(f: &mut Frame, chat: &ChatState, view: &Viewport, area: ratatui:
             }
         })
         .collect();
-    f.render_widget(
-        Paragraph::new(items).block(Block::bordered().title(" 会话 ")),
-        area,
-    );
+    f.render_widget(Paragraph::new(items).block(Block::bordered().title(" 会话 ")), area);
 }
 
 /// 右上：当前会话的消息流。
 fn draw_messages(f: &mut Frame, chat: &ChatState, view: &Viewport, area: ratatui::layout::Rect) {
     let (title, lines) = match view.selected.and_then(|p| chat.conversation(p).map(|c| (p, c))) {
-        Some((peer, conversation)) => (
-            format!(" 与 {peer} 的对话 "),
-            conversation.messages.iter().map(render_msg).collect(),
-        ),
+        Some((peer, conversation)) => {
+            (format!(" 与 {peer} 的对话 "), conversation.messages.iter().map(render_msg).collect())
+        }
         None => (" 尚无会话 ".to_string(), vec![Line::from("输入 /to <user_id> 开始聊天")]),
     };
     f.render_widget(
-        Paragraph::new(lines)
-            .scroll((view.scroll, 0))
-            .block(Block::bordered().title(title)),
+        Paragraph::new(lines).scroll((view.scroll, 0)).block(Block::bordered().title(title)),
         area,
     );
 }
@@ -292,9 +283,8 @@ fn draw_input(f: &mut Frame, view: &Viewport, area: ratatui::layout::Rect, user_
     let cursor_x = area.x + 2 + text_width.min(area.width.saturating_sub(3));
 
     f.render_widget(
-        Paragraph::new(line).block(
-            Block::bordered().title(format!(" [user {user_id}] {} ", view.hint)),
-        ),
+        Paragraph::new(line)
+            .block(Block::bordered().title(format!(" [user {user_id}] {} ", view.hint))),
         area,
     );
     f.set_cursor_position((cursor_x, area.y + 1));
@@ -321,17 +311,10 @@ mod tests {
 
     #[test]
     fn parse_send_content() {
-        assert_eq!(
-            parse_input("你好"),
-            InputAction::Send {
-                content: "你好".to_string()
-            }
-        );
+        assert_eq!(parse_input("你好"), InputAction::Send { content: "你好".to_string() });
         assert_eq!(
             parse_input("  带空格 的内容  "),
-            InputAction::Send {
-                content: "带空格 的内容".to_string()
-            }
+            InputAction::Send { content: "带空格 的内容".to_string() }
         );
     }
 
@@ -358,11 +341,7 @@ mod tests {
         // 造两个会话（peer 2、7）
         for peer in [2, 7] {
             chat.on_event(
-                &ClientEvent::MessageQueued {
-                    client_msg_id: 1,
-                    to: peer,
-                    content: Bytes::new(),
-                },
+                &ClientEvent::MessageQueued { client_msg_id: 1, to: peer, content: Bytes::new() },
                 9,
             );
         }

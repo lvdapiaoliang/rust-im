@@ -9,7 +9,7 @@
 //! CLI 打印版（阶段 3 的过渡形态）已由 TUI 取代——事件流接口
 //! （`ClientEvent`）不变，换的只是「渲染层」。
 
-use im_client::{tui, ClientConfig};
+use im_client::{ClientConfig, tui};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

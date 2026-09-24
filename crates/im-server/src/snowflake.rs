@@ -122,9 +122,7 @@ impl ManualClock {
     /// 创建停在 `ms` 的时钟。
     #[must_use]
     pub fn new(ms: u64) -> Self {
-        Self {
-            now: std::sync::atomic::AtomicU64::new(ms),
-        }
+        Self { now: std::sync::atomic::AtomicU64::new(ms) }
     }
 
     /// 拨到 `ms`（可以往回拨——正好用来测回拨分支）。
@@ -134,8 +132,7 @@ impl ManualClock {
 
     /// 前进 `ms` 毫秒。
     pub fn advance(&self, ms: u64) {
-        self.now
-            .fetch_add(ms, std::sync::atomic::Ordering::Relaxed);
+        self.now.fetch_add(ms, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -186,12 +183,7 @@ impl<C: Clock> Snowflake<C> {
             machine_id <= MAX_MACHINE_ID,
             "machine_id {machine_id} 超出 {MACHINE_BITS} 位上限 {MAX_MACHINE_ID}"
         );
-        Self {
-            machine_id,
-            last_ms: None,
-            sequence: 0,
-            clock,
-        }
+        Self { machine_id, last_ms: None, sequence: 0, clock }
     }
 
     /// 生成下一个 ID。
@@ -235,9 +227,7 @@ impl<C: Clock> Snowflake<C> {
 /// `const fn`：可以在编译期算出测试期望值（编译期对拍）。
 #[must_use]
 pub const fn assemble(timestamp: u64, machine_id: u64, sequence: u64) -> u64 {
-    (timestamp << (MACHINE_BITS + SEQUENCE_BITS))
-        | (machine_id << SEQUENCE_BITS)
-        | sequence
+    (timestamp << (MACHINE_BITS + SEQUENCE_BITS)) | (machine_id << SEQUENCE_BITS) | sequence
 }
 
 /// 位段解析：ID → (timestamp, `machine_id`, sequence)。
@@ -255,7 +245,10 @@ pub const fn decode(id: u64) -> (u64, u64, u64) {
 mod tests {
     use super::*;
 
-    fn generator(ms: u64, machine_id: u64) -> (std::sync::Arc<ManualClock>, Snowflake<ManualClock>) {
+    fn generator(
+        ms: u64,
+        machine_id: u64,
+    ) -> (std::sync::Arc<ManualClock>, Snowflake<ManualClock>) {
         let clock = std::sync::Arc::new(ManualClock::new(ms));
         let sf = Snowflake::new(machine_id, clock.clone());
         (clock, sf)
@@ -324,10 +317,7 @@ mod tests {
         sf.next_id().unwrap();
 
         clock.set(997); // 回拨 3ms（≤ 5）
-        assert_eq!(
-            sf.next_id(),
-            Err(SnowflakeError::ClockMovedBackwards { backwards: 3 })
-        );
+        assert_eq!(sf.next_id(), Err(SnowflakeError::ClockMovedBackwards { backwards: 3 }));
 
         clock.set(1001); // 时钟追平并超过
         let id = sf.next_id().unwrap();
@@ -341,12 +331,7 @@ mod tests {
         sf.next_id().unwrap();
 
         clock.set(50_000); // 回拨 50000ms
-        assert_eq!(
-            sf.next_id(),
-            Err(SnowflakeError::ClockMovedBackwards {
-                backwards: 50_000
-            })
-        );
+        assert_eq!(sf.next_id(), Err(SnowflakeError::ClockMovedBackwards { backwards: 50_000 }));
     }
 
     /// 并发唯一性：8 线程各持独立生成器（不同 `machine_id`）× 10000 个 ID 无一重复。
@@ -365,15 +350,17 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 let mut sf = Snowflake::new(t, Arc::new(SystemClock));
                 (0..PER_THREAD)
-                    .map(|_| loop {
-                        match sf.next_id() {
-                            Ok(id) => break id,
-                            // 单毫秒 4096 个用尽是正常约束：生产方的
-                            // 标准姿势是等到下一毫秒再取号。
-                            Err(SnowflakeError::SequenceExhausted) => {
-                                std::thread::sleep(std::time::Duration::from_millis(1));
+                    .map(|_| {
+                        loop {
+                            match sf.next_id() {
+                                Ok(id) => break id,
+                                // 单毫秒 4096 个用尽是正常约束：生产方的
+                                // 标准姿势是等到下一毫秒再取号。
+                                Err(SnowflakeError::SequenceExhausted) => {
+                                    std::thread::sleep(std::time::Duration::from_millis(1));
+                                }
+                                Err(e) => panic!("发号失败: {e}"),
                             }
-                            Err(e) => panic!("发号失败: {e}"),
                         }
                     })
                     .collect::<Vec<_>>()

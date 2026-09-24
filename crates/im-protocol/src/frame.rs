@@ -119,13 +119,7 @@ impl Frame {
     /// 便捷构造（`flags` 默认 0）。
     #[must_use]
     pub fn new(cmd: Cmd, seq: u64, ack: u64, payload: impl Into<Bytes>) -> Self {
-        Self {
-            cmd,
-            flags: 0,
-            seq,
-            ack,
-            payload: payload.into(),
-        }
+        Self { cmd, flags: 0, seq, ack, payload: payload.into() }
     }
 
     /// 本帧编码后的总字节数（调用方据此一次性分配准确的缓冲区）。
@@ -238,9 +232,6 @@ mod tests {
         ] {
             assert_eq!(Cmd::try_from(cmd.to_byte()).ok(), Some(cmd));
         }
-        assert!(matches!(
-            Cmd::try_from(0xFF),
-            Err(ProtocolError::UnknownCommand { got: 0xFF })
-        ));
+        assert!(matches!(Cmd::try_from(0xFF), Err(ProtocolError::UnknownCommand { got: 0xFF })));
     }
 }

@@ -44,14 +44,14 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
-use im_protocol::{Cmd, Frame, DEFAULT_MAX_FRAME_LEN};
+use im_protocol::{Cmd, DEFAULT_MAX_FRAME_LEN, Frame};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
 use crate::connection::{Connection, ReadHalf, WriteHalf};
 use crate::error::TransportError;
-use crate::shutdown::{shutdown_channel, ShutdownRx};
+use crate::shutdown::{ShutdownRx, shutdown_channel};
 
 /// 出站帧通道容量。
 ///
@@ -209,22 +209,13 @@ pub fn spawn_gateway(
     config: GatewayConfig,
     inbound: mpsc::Sender<InboundFrame>,
     shutdown: ShutdownRx,
-) -> (
-    ConnectionHandle,
-    tokio::task::JoinHandle<Result<(), TransportError>>,
-) {
+) -> (ConnectionHandle, tokio::task::JoinHandle<Result<(), TransportError>>) {
     // 出站通道 + 写 actor：独占写半部，消费所有发送方的帧
     let (tx, rx) = mpsc::channel(OUTBOUND_CHANNEL_CAPACITY);
     let handle = ConnectionHandle { tx };
 
-    let task = tokio::spawn(gateway_lifecycle(
-        stream,
-        config,
-        inbound,
-        rx,
-        handle.clone(),
-        shutdown,
-    ));
+    let task =
+        tokio::spawn(gateway_lifecycle(stream, config, inbound, rx, handle.clone(), shutdown));
     (handle, task)
 }
 
@@ -402,11 +393,7 @@ mod tests {
     /// 与生产 im-server 的区别：没有会话层，入站帧直接给测试观察。
     async fn spawn_gateway(
         config: GatewayConfig,
-    ) -> (
-        std::net::SocketAddr,
-        mpsc::Receiver<InboundFrame>,
-        ShutdownTx,
-    ) {
+    ) -> (std::net::SocketAddr, mpsc::Receiver<InboundFrame>, ShutdownTx) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (inbound_tx, inbound_rx) = mpsc::channel(16);
@@ -451,10 +438,7 @@ mod tests {
         assert_eq!(event.frame.cmd, Cmd::Msg);
         assert_eq!(event.frame.payload, Bytes::from_static(b"hello gateway"));
         // peer 是客户端的源地址（含随机端口），只能断言 IP 维度
-        let peer_ip = event
-            .peer
-            .expect("应携带对端地址")
-            .ip();
+        let peer_ip = event.peer.expect("应携带对端地址").ip();
         assert!(peer_ip.is_loopback());
 
         // 业务层回话
@@ -480,10 +464,7 @@ mod tests {
         let (addr, mut inbound, _shutdown) = spawn_gateway(GatewayConfig::default()).await;
         let mut client = Connection::connect(&addr.to_string()).await.unwrap();
 
-        client
-            .write_frame(&Frame::new(Cmd::Ping, 7, 0, Bytes::new()))
-            .await
-            .unwrap();
+        client.write_frame(&Frame::new(Cmd::Ping, 7, 0, Bytes::new())).await.unwrap();
 
         let pong = timeout(Duration::from_secs(2), client.read_frame())
             .await
@@ -495,9 +476,7 @@ mod tests {
 
         // Ping 被“就地消化”，业务层不应看到它
         assert!(
-            timeout(Duration::from_millis(200), inbound.recv())
-                .await
-                .is_err(),
+            timeout(Duration::from_millis(200), inbound.recv()).await.is_err(),
             "Ping 不应进入业务层"
         );
     }
@@ -512,9 +491,7 @@ mod tests {
         let (client_inbound_tx, mut client_inbound) = mpsc::channel(16);
         let (_client_shutdown_tx, client_shutdown_rx) = shutdown_channel();
         let client_config = GatewayConfig {
-            heartbeat: HeartbeatPolicy::Client {
-                interval: Duration::from_millis(50),
-            },
+            heartbeat: HeartbeatPolicy::Client { interval: Duration::from_millis(50) },
             ..GatewayConfig::default()
         };
         tokio::spawn(run_gateway_connection(
@@ -534,9 +511,7 @@ mod tests {
 
         // 服务端业务层同样不应看到任何 Ping
         assert!(
-            timeout(Duration::from_millis(200), server_inbound.recv())
-                .await
-                .is_err(),
+            timeout(Duration::from_millis(200), server_inbound.recv()).await.is_err(),
             "Ping 不应进入服务端业务层"
         );
     }
@@ -544,10 +519,8 @@ mod tests {
     /// 空闲超时：静默客户端在 `idle_timeout` 后被服务端断开（客户端看到 EOF）
     #[tokio::test]
     async fn idle_timeout_closes_silent_connection() {
-        let config = GatewayConfig {
-            idle_timeout: Duration::from_millis(150),
-            ..GatewayConfig::default()
-        };
+        let config =
+            GatewayConfig { idle_timeout: Duration::from_millis(150), ..GatewayConfig::default() };
         let (addr, _inbound, _shutdown) = spawn_gateway(config).await;
 
         let mut client = Connection::connect(&addr.to_string()).await.unwrap();
@@ -560,10 +533,7 @@ mod tests {
         assert!(frame.is_none(), "应收到 EOF 而非帧");
 
         // 必须等满了 idle_timeout 才断（不是秒断——秒断说明超时逻辑错了）
-        assert!(
-            started.elapsed() >= Duration::from_millis(150),
-            "至少等满 idle_timeout 才断连"
-        );
+        assert!(started.elapsed() >= Duration::from_millis(150), "至少等满 idle_timeout 才断连");
     }
 
     /// 恶意流：非本协议的字节进入后，网关以 Protocol 错误终结连接
@@ -578,13 +548,9 @@ mod tests {
         let (result_tx, result_rx) = oneshot::channel();
         tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let result = run_gateway_connection(
-                stream,
-                GatewayConfig::default(),
-                inbound_tx,
-                shutdown_rx,
-            )
-            .await;
+            let result =
+                run_gateway_connection(stream, GatewayConfig::default(), inbound_tx, shutdown_rx)
+                    .await;
             let _ = result_tx.send(result);
         });
 
@@ -597,10 +563,7 @@ mod tests {
             .await
             .expect("2s 内网关应终结")
             .expect("测试 task 存活");
-        assert!(matches!(
-            result,
-            Err(TransportError::Protocol(ProtocolError::BadMagic { .. }))
-        ));
+        assert!(matches!(result, Err(TransportError::Protocol(ProtocolError::BadMagic { .. }))));
     }
 
     /// 外部关停：服务端触发 shutdown 后，客户端看到 EOF
@@ -610,10 +573,7 @@ mod tests {
         let mut client = Connection::connect(&addr.to_string()).await.unwrap();
 
         // 先确认连接已被服务端接手（避免 accept 与 shutdown 竞争）
-        client
-            .write_frame(&Frame::new(Cmd::Ping, 1, 0, Bytes::new()))
-            .await
-            .unwrap();
+        client.write_frame(&Frame::new(Cmd::Ping, 1, 0, Bytes::new())).await.unwrap();
         let pong = timeout(Duration::from_secs(2), client.read_frame())
             .await
             .expect("2s 内应收到 Pong")
@@ -637,10 +597,7 @@ mod tests {
         let mut client = Connection::connect(&addr.to_string()).await.unwrap();
 
         // 建立连接并让业务层拿到 handle
-        client
-            .write_frame(&Frame::new(Cmd::Msg, 1, 0, Bytes::new()))
-            .await
-            .unwrap();
+        client.write_frame(&Frame::new(Cmd::Msg, 1, 0, Bytes::new())).await.unwrap();
         let event = timeout(Duration::from_secs(2), inbound.recv())
             .await
             .expect("2s 内应收到入站帧")
@@ -648,11 +605,7 @@ mod tests {
 
         // 立刻入队 5 帧，然后马上关停——写 actor 必须排干队列再退出
         for i in 0..5u64 {
-            event
-                .handle
-                .send(Frame::new(Cmd::MsgAck, i, 0, Bytes::new()))
-                .await
-                .unwrap();
+            event.handle.send(Frame::new(Cmd::MsgAck, i, 0, Bytes::new())).await.unwrap();
         }
         shutdown_tx.trigger();
 

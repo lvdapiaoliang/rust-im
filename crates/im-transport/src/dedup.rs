@@ -83,10 +83,7 @@ impl DedupWindow {
     /// 以给定的初始 seq（对端声明的起始 seq）创建。
     #[must_use]
     pub fn new(initial_seq: u64) -> Self {
-        Self {
-            rcv_nxt: initial_seq,
-            bitmap: 0,
-        }
+        Self { rcv_nxt: initial_seq, bitmap: 0 }
     }
 
     /// 喂入一个收到的 seq，返回判定（见 [`Verdict`]）。
@@ -114,9 +111,7 @@ impl DedupWindow {
         // 前方：offset ∈ [1, WINDOW_SIZE] 可缓存
         let offset = seq - self.rcv_nxt; // > 0
         if offset > WINDOW_SIZE {
-            return Verdict::TooFar {
-                expected: self.rcv_nxt,
-            };
+            return Verdict::TooFar { expected: self.rcv_nxt };
         }
         let mask = 1u64 << (offset - 1);
         if self.bitmap & mask != 0 {
@@ -237,10 +232,7 @@ mod tests {
     #[test]
     fn beyond_window_is_too_far() {
         let mut w = DedupWindow::new(100);
-        assert!(matches!(
-            w.feed(100 + WINDOW_SIZE + 1),
-            Verdict::TooFar { expected: 100 }
-        ));
+        assert!(matches!(w.feed(100 + WINDOW_SIZE + 1), Verdict::TooFar { expected: 100 }));
         // 恰好窗口边界（rcv_nxt + 64）还能缓存
         assert_eq!(w.feed(100 + WINDOW_SIZE), Verdict::OutOfOrder);
     }

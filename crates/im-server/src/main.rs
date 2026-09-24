@@ -11,7 +11,7 @@
 //! 学习文档：`docs/06-server-arch.md`
 
 use anyhow::Result;
-use im_server::{serve, SessionConfig, Sessions};
+use im_server::{SessionConfig, Sessions, serve};
 use im_transport::shutdown_channel;
 
 /// 默认监听地址（可用 `IM_SERVER_ADDR` 覆盖）。

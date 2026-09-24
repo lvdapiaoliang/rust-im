@@ -99,10 +99,7 @@ mod tests {
 
     #[test]
     fn display_messages_are_helpful() {
-        let e = ProtocolError::BadMagic {
-            expected: 0x494D,
-            got: 0x1234,
-        };
+        let e = ProtocolError::BadMagic { expected: 0x494D, got: 0x1234 };
         assert!(e.to_string().contains("494d"), "实际输出: {e}");
 
         let e = ProtocolError::FrameTooLarge { got: 999, max: 100 };

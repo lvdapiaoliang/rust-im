@@ -83,12 +83,7 @@ impl PendingMsg {
         if cursor.len() != len {
             return Err(StorageError::Corrupted);
         }
-        Ok(Self {
-            client_msg_id,
-            to,
-            attempts,
-            content: Bytes::copy_from_slice(cursor),
-        })
+        Ok(Self { client_msg_id, to, attempts, content: Bytes::copy_from_slice(cursor) })
     }
 }
 
@@ -107,9 +102,7 @@ impl LocalStore {
     ///
     /// 见 [`Engine::open`]。
     pub fn open(dir: impl AsRef<std::path::Path>) -> Result<Self, StorageError> {
-        Ok(Self {
-            engine: Engine::open(dir)?,
-        })
+        Ok(Self { engine: Engine::open(dir)? })
     }
 
     /// 收到的消息入库（去重由调用方负责——存储层不解释业务键的重复）。
@@ -132,12 +125,8 @@ impl LocalStore {
     /// 磁盘写失败时返回 [`StorageError::Io`]。
     pub fn enqueue_outgoing(&mut self, to: u64, content: &[u8]) -> Result<u64, StorageError> {
         let client_msg_id = self.next_client_msg_id()?;
-        let pending = PendingMsg {
-            client_msg_id,
-            to,
-            content: Bytes::copy_from_slice(content),
-            attempts: 0,
-        };
+        let pending =
+            PendingMsg { client_msg_id, to, content: Bytes::copy_from_slice(content), attempts: 0 };
         self.engine.put(&pending_key(client_msg_id), &pending.encode())?;
         Ok(client_msg_id)
     }
@@ -236,10 +225,7 @@ impl LocalStore {
     ///
     /// 存储读取失败时返回 [`StorageError::Io`]。
     pub fn sync_cursor(&mut self) -> Result<u64, StorageError> {
-        Ok(self
-            .engine
-            .get(KEY_SYNC_CURSOR)?
-            .map_or(0, |value| decode_u64_value(&value)))
+        Ok(self.engine.get(KEY_SYNC_CURSOR)?.map_or(0, |value| decode_u64_value(&value)))
     }
 
     /// 更新同步游标（单调：只增不减）。
@@ -262,10 +248,7 @@ impl LocalStore {
 
     /// 分配并持久化下一个 `client_msg_id`。
     fn next_client_msg_id(&mut self) -> Result<u64, StorageError> {
-        let prev = self
-            .engine
-            .get(KEY_CLIENT_SEQ)?
-            .map_or(0, |value| decode_u64_value(&value));
+        let prev = self.engine.get(KEY_CLIENT_SEQ)?.map_or(0, |value| decode_u64_value(&value));
         let next = prev + 1;
         self.engine.put(KEY_CLIENT_SEQ, &next.to_be_bytes())?;
         Ok(next)

@@ -68,11 +68,7 @@ pub fn encode_u64(mut value: u64, dst: &mut impl BufMut) -> usize {
 pub const fn encoded_len(value: u64) -> usize {
     // 有效位数 = 64 - 前导零；每 7 位一组；value = 0 也要 1 字节
     let bits = 64 - value.leading_zeros() as usize;
-    if bits == 0 {
-        1
-    } else {
-        bits.div_ceil(7)
-    }
+    if bits == 0 { 1 } else { bits.div_ceil(7) }
 }
 
 /// zigzag 编码：有符号 → 无符号（`0→0, -1→1, 1→2, -2→3…`）。
@@ -216,10 +212,7 @@ mod tests {
             assert!(dec.push(0xFF).is_ok(), "10 个字节内不应报错");
         }
         // 第 11 个字节：超长
-        assert!(matches!(
-            dec.push(0xFF),
-            Err(ProtocolError::VarintTooLong { .. })
-        ));
+        assert!(matches!(dec.push(0xFF), Err(ProtocolError::VarintTooLong { .. })));
     }
 
     proptest! {

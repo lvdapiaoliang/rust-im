@@ -82,13 +82,9 @@ impl ChatState {
         match event {
             ClientEvent::Connected { .. } => self.connected = true,
             ClientEvent::Disconnected | ClientEvent::Rejected { .. } => {
-                self.connected = false
+                self.connected = false;
             }
-            ClientEvent::MessageQueued {
-                client_msg_id,
-                to,
-                content,
-            } => {
+            ClientEvent::MessageQueued { client_msg_id, to, content } => {
                 // 发送中：转圈条目登记进与接收者的会话
                 self.entry(*to).messages.push(ChatMsg {
                     from_me: true,
@@ -108,10 +104,7 @@ impl ChatState {
                     self.accept_incoming(msg);
                 }
             }
-            ClientEvent::Ack {
-                msg_id,
-                client_msg_id,
-            } => {
+            ClientEvent::Ack { msg_id, client_msg_id } => {
                 // 核销「转圈」条目：client_msg_id 是跨重发稳定的索引。
                 // 新消息在尾部，倒序找平均更快（手速有限，条目很少）
                 'outer: for conversation in self.conversations.values_mut() {
@@ -167,10 +160,7 @@ impl ChatState {
     /// 事件重放永远安全，这是事件溯源风格的前提）。
     fn accept_incoming(&mut self, msg: &Msg) {
         let conversation = self.entry(msg.from);
-        if conversation
-            .messages
-            .iter()
-            .any(|m| !m.from_me && m.client_msg_id == msg.client_msg_id)
+        if conversation.messages.iter().any(|m| !m.from_me && m.client_msg_id == msg.client_msg_id)
         {
             return;
         }
@@ -222,13 +212,7 @@ mod tests {
         assert_eq!(conversation.messages[0].status, SendStatus::Sending);
         assert_eq!(conversation.messages[0].msg_id, None);
 
-        state.on_event(
-            &ClientEvent::Ack {
-                msg_id: 500,
-                client_msg_id: 1,
-            },
-            9,
-        );
+        state.on_event(&ClientEvent::Ack { msg_id: 500, client_msg_id: 1 }, 9);
         let conversation = state.conversation(7).expect("会话已建立");
         assert_eq!(conversation.messages[0].status, SendStatus::Delivered);
         assert_eq!(conversation.messages[0].msg_id, Some(500));
@@ -247,10 +231,7 @@ mod tests {
             9,
         );
         state.on_event(&ClientEvent::SendFailed { client_msg_id: 3 }, 9);
-        assert_eq!(
-            state.conversation(2).unwrap().messages[0].status,
-            SendStatus::Failed
-        );
+        assert_eq!(state.conversation(2).unwrap().messages[0].status, SendStatus::Failed);
     }
 
     /// 入站：进对应会话、未读递增；重复事件幂等。
@@ -281,20 +262,8 @@ mod tests {
         assert!(state.is_connected());
 
         let batch = ClientEvent::SyncBatch(vec![
-            Msg {
-                from: 7,
-                to: 9,
-                msg_id: 10,
-                client_msg_id: 1,
-                content: Bytes::from_static(b"a"),
-            },
-            Msg {
-                from: 7,
-                to: 9,
-                msg_id: 11,
-                client_msg_id: 2,
-                content: Bytes::from_static(b"b"),
-            },
+            Msg { from: 7, to: 9, msg_id: 10, client_msg_id: 1, content: Bytes::from_static(b"a") },
+            Msg { from: 7, to: 9, msg_id: 11, client_msg_id: 2, content: Bytes::from_static(b"b") },
         ]);
         state.on_event(&batch, 9);
         assert_eq!(state.conversation(7).unwrap().messages.len(), 2);

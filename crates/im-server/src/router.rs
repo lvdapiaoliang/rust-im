@@ -80,14 +80,9 @@ impl<V: Clone> Router<V> {
     pub fn new(shard_count: usize) -> Self {
         // 下一个 2 的幂（至少 1）：位技巧——最高位以下全部置 1 后 +1
         let pow = (shard_count.max(1)).next_power_of_two();
-        let shards = (0..pow)
-            .map(|_| Mutex::new(HashMap::new()))
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        Self {
-            shards,
-            hasher: RandomState::new(),
-        }
+        let shards =
+            (0..pow).map(|_| Mutex::new(HashMap::new())).collect::<Vec<_>>().into_boxed_slice();
+        Self { shards, hasher: RandomState::new() }
     }
 
     /// key → 分片下标：高位哈希 + 位与取模。
@@ -186,10 +181,7 @@ impl<V: Clone> Router<V> {
     /// 任一分片锁中毒时 panic。
     #[must_use]
     pub fn len(&self) -> usize {
-        self.shards
-            .iter()
-            .map(|s| s.lock().expect("路由表锁中毒").len())
-            .sum()
+        self.shards.iter().map(|s| s.lock().expect("路由表锁中毒").len()).sum()
     }
 
     /// 是否没有任何在线用户。
@@ -212,10 +204,7 @@ impl<V: Clone> Clone for Router<V> {
             .collect::<Vec<_>>()
             .into_boxed_slice();
         // 克隆 hasher 保持分片映射一致（重要！否则同一 key 两实例分片不同）
-        Self {
-            shards,
-            hasher: self.hasher.clone(),
-        }
+        Self { shards, hasher: self.hasher.clone() }
     }
 }
 
@@ -225,8 +214,8 @@ pub type SharedRouter<V> = Arc<Router<V>>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::TryLockError;
     use std::sync::Arc;
+    use std::sync::TryLockError;
 
     /// 基本 CRUD + 重复注册拒绝
     #[test]

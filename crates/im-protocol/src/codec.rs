@@ -25,7 +25,7 @@ use bytes::{Buf, Bytes, BytesMut};
 
 use crate::crc32::Crc32;
 use crate::error::ProtocolError;
-use crate::frame::{Cmd, Frame, CRC_LEN, HEADER_LEN};
+use crate::frame::{CRC_LEN, Cmd, Frame, HEADER_LEN};
 use crate::varint::VarIntDecoder;
 
 /// 默认单帧上限：1 MiB。
@@ -108,11 +108,7 @@ impl FrameDecoder {
     /// 以自定义单帧上限创建。
     #[must_use]
     pub fn with_max_frame_len(max_frame_len: usize) -> Self {
-        Self {
-            max_frame_len,
-            buf: BytesMut::new(),
-            current: None,
-        }
+        Self { max_frame_len, buf: BytesMut::new(), current: None }
     }
 
     /// 喂入一段原始字节（来自一次 TCP read），返回本次解出的所有完整帧。
@@ -222,14 +218,10 @@ fn advance(
                 if v > max_frame_len as u64 {
                     return Err(ProtocolError::FrameTooLarge { got: v, max: max_frame_len });
                 }
-                let len = usize::try_from(v).map_err(|_| ProtocolError::FrameTooLarge {
-                    got: v,
-                    max: max_frame_len,
-                })?;
-                partial.stage = Stage::Payload {
-                    payload: BytesMut::with_capacity(len),
-                    remaining: len,
-                };
+                let len = usize::try_from(v)
+                    .map_err(|_| ProtocolError::FrameTooLarge { got: v, max: max_frame_len })?;
+                partial.stage =
+                    Stage::Payload { payload: BytesMut::with_capacity(len), remaining: len };
             }
             Stage::Payload { mut payload, remaining } => {
                 if buf.is_empty() {
@@ -242,11 +234,8 @@ fn advance(
                 payload.extend_from_slice(&chunk);
                 if take == remaining {
                     // 载荷收齐：freeze 成共享句柄（享元模式：后续克隆零拷贝）
-                    partial.stage = Stage::Crc {
-                        payload: payload.freeze(),
-                        crc: [0; CRC_LEN],
-                        filled: 0,
-                    };
+                    partial.stage =
+                        Stage::Crc { payload: payload.freeze(), crc: [0; CRC_LEN], filled: 0 };
                 } else {
                     partial.stage = Stage::Payload { payload, remaining: remaining - take };
                 }
@@ -374,10 +363,7 @@ mod tests {
         let mut wire = msg_frame(1, b"hi").encode().to_vec();
         wire[0] = 0x00; // 破坏 magic 高字节
         let mut decoder = FrameDecoder::new();
-        assert!(matches!(
-            decoder.decode(&wire),
-            Err(ProtocolError::BadMagic { .. })
-        ));
+        assert!(matches!(decoder.decode(&wire), Err(ProtocolError::BadMagic { .. })));
     }
 
     #[test]
@@ -385,10 +371,7 @@ mod tests {
         let mut wire = msg_frame(1, b"hi").encode().to_vec();
         wire[2] = crate::VERSION + 1;
         let mut decoder = FrameDecoder::new();
-        assert!(matches!(
-            decoder.decode(&wire),
-            Err(ProtocolError::UnsupportedVersion { .. })
-        ));
+        assert!(matches!(decoder.decode(&wire), Err(ProtocolError::UnsupportedVersion { .. })));
     }
 
     #[test]
@@ -396,10 +379,7 @@ mod tests {
         let mut wire = msg_frame(1, b"hi").encode().to_vec();
         wire[3] = 0xEE;
         let mut decoder = FrameDecoder::new();
-        assert!(matches!(
-            decoder.decode(&wire),
-            Err(ProtocolError::UnknownCommand { got: 0xEE })
-        ));
+        assert!(matches!(decoder.decode(&wire), Err(ProtocolError::UnknownCommand { got: 0xEE })));
     }
 
     #[test]
@@ -418,10 +398,7 @@ mod tests {
         let mut wire = msg_frame(9, b"integrity").encode().to_vec();
         *wire.last_mut().expect("非空") ^= 0x01; // 翻转 CRC 最低位
         let mut decoder = FrameDecoder::new();
-        assert!(matches!(
-            decoder.decode(&wire),
-            Err(ProtocolError::CrcMismatch { .. })
-        ));
+        assert!(matches!(decoder.decode(&wire), Err(ProtocolError::CrcMismatch { .. })));
     }
 
     #[test]
@@ -429,10 +406,7 @@ mod tests {
         let mut wire = msg_frame(9, b"integrity").encode().to_vec();
         wire[8] ^= 0x01; // 翻转 payload 首字节（CRC 字节本身不动）
         let mut decoder = FrameDecoder::new();
-        assert!(matches!(
-            decoder.decode(&wire),
-            Err(ProtocolError::CrcMismatch { .. })
-        ));
+        assert!(matches!(decoder.decode(&wire), Err(ProtocolError::CrcMismatch { .. })));
     }
 
     #[test]

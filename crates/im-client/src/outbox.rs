@@ -101,11 +101,7 @@ impl Outbox {
                 deadline: Instant::now(),
             });
         }
-        Ok(Self {
-            inflight,
-            retry_timeout,
-            retry_max_attempts,
-        })
+        Ok(Self { inflight, retry_timeout, retry_max_attempts })
     }
 
     /// 登记一条新消息（持久化 + 分配 `client_msg_id`），返回待发的
@@ -145,21 +141,11 @@ impl Outbox {
         msg_id: u64,
         from_me: u64,
     ) -> Result<(), StorageError> {
-        let Some(pos) = self
-            .inflight
-            .iter()
-            .position(|m| m.client_msg_id == client_msg_id)
-        else {
+        let Some(pos) = self.inflight.iter().position(|m| m.client_msg_id == client_msg_id) else {
             return Ok(()); // 迟到的重复 Ack：早已核销
         };
         let confirmed = self.inflight.remove(pos);
-        store.ack_outgoing(
-            client_msg_id,
-            msg_id,
-            from_me,
-            confirmed.to,
-            &confirmed.content,
-        )
+        store.ack_outgoing(client_msg_id, msg_id, from_me, confirmed.to, &confirmed.content)
     }
 
     /// 重连补发：全部在途消息各发一遍，RTO 全部重置。
@@ -272,12 +258,8 @@ mod tests {
 
     fn outbox(dir: &TempDir, rto_ms: u64, max_attempts: u32) -> (LocalStore, Outbox) {
         let mut store = LocalStore::open(dir.path()).expect("本地库应能打开");
-        let outbox = Outbox::load(
-            &mut store,
-            Duration::from_millis(rto_ms),
-            max_attempts,
-        )
-        .expect("邮箱应能加载");
+        let outbox = Outbox::load(&mut store, Duration::from_millis(rto_ms), max_attempts)
+            .expect("邮箱应能加载");
         (store, outbox)
     }
 
@@ -290,9 +272,7 @@ mod tests {
         assert_eq!(outbox.len(), 1);
         assert_eq!(msg.client_msg_id, 1, "首个本地 ID 从 1 开始");
 
-        outbox
-            .ack(&mut store, msg.client_msg_id, 777, 1)
-            .unwrap();
+        outbox.ack(&mut store, msg.client_msg_id, 777, 1).unwrap();
         assert!(outbox.is_empty(), "Ack 后核销");
 
         // 转正落盘：直接重开底层库验证（绕过邮箱，防自说自话）
@@ -320,9 +300,7 @@ mod tests {
     fn due_resends_then_reschedules_with_backoff() {
         let dir = TempDir::new();
         let (mut store, mut outbox) = outbox(&dir, 20, 5);
-        let msg = outbox
-            .enqueue(&mut store, 2, Bytes::from_static(b"retry me"))
-            .unwrap();
+        let msg = outbox.enqueue(&mut store, 2, Bytes::from_static(b"retry me")).unwrap();
 
         std::thread::sleep(Duration::from_millis(30)); // 越过 RTO
         let (resends, failed) = outbox.due(&mut store, Instant::now()).unwrap();
@@ -334,10 +312,7 @@ mod tests {
 
         // 指数退避：第二轮 deadline 至少在一倍 RTO 之后（2^1 = 2 倍）
         let next = outbox.next_deadline().expect("仍有在途消息");
-        assert!(
-            next > Instant::now() + Duration::from_millis(20),
-            "退避应翻倍，实际下次 {next:?}"
-        );
+        assert!(next > Instant::now() + Duration::from_millis(20), "退避应翻倍，实际下次 {next:?}");
     }
 
     /// 超过最大次数：放弃并从重发表落盘删除（重启不再复活）。
@@ -345,9 +320,7 @@ mod tests {
     fn gives_up_after_max_attempts() {
         let dir = TempDir::new();
         let (mut store, mut outbox) = outbox(&dir, 5, 2);
-        let msg = outbox
-            .enqueue(&mut store, 2, Bytes::from_static(b"hopeless"))
-            .unwrap();
+        let msg = outbox.enqueue(&mut store, 2, Bytes::from_static(b"hopeless")).unwrap();
 
         std::thread::sleep(Duration::from_millis(10));
         let (resends, failed) = outbox.due(&mut store, Instant::now()).unwrap();
@@ -371,9 +344,7 @@ mod tests {
         let dir = TempDir::new();
         let client_msg_id = {
             let (mut store, mut outbox) = outbox(&dir, 50, 3);
-            let msg = outbox
-                .enqueue(&mut store, 2, Bytes::from_static(b"crash survivor"))
-                .unwrap();
+            let msg = outbox.enqueue(&mut store, 2, Bytes::from_static(b"crash survivor")).unwrap();
             drop(outbox); // 模拟进程退出（消息在途、未 Ack）
             msg.client_msg_id
         };

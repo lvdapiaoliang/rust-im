@@ -68,9 +68,7 @@ pub trait Payload: Sized {
     /// 帧的命令字与本类型不符，或 payload 解析失败时返回 [`ProtocolError`]。
     fn decode_frame(frame: &crate::Frame) -> Result<Self, ProtocolError> {
         if frame.cmd != Self::CMD {
-            return Err(ProtocolError::UnknownCommand {
-                got: frame.cmd.to_byte(),
-            });
+            return Err(ProtocolError::UnknownCommand { got: frame.cmd.to_byte() });
         }
         Self::decode(&frame.payload)
     }
@@ -96,11 +94,8 @@ impl<'a> Reader<'a> {
 
     /// 读一个 varint（复用阶段 1 的一次性解码器）。
     fn varint(&mut self) -> Result<u64, ProtocolError> {
-        let (value, used) =
-            varint::decode_u64(self.src).ok_or(ProtocolError::PayloadTooShort {
-                need: 1,
-                got: 0,
-            })?;
+        let (value, used) = varint::decode_u64(self.src)
+            .ok_or(ProtocolError::PayloadTooShort { need: 1, got: 0 })?;
         *self.src = &self.src[used..];
         Ok(value)
     }
@@ -134,9 +129,7 @@ impl<'a> Reader<'a> {
         if self.src.is_empty() {
             Ok(())
         } else {
-            Err(ProtocolError::TrailingBytes {
-                extra: self.src.len(),
-            })
+            Err(ProtocolError::TrailingBytes { extra: self.src.len() })
         }
     }
 }
@@ -204,19 +197,13 @@ impl HandshakeAck {
     /// 构造「接受」应答。
     #[must_use]
     pub fn accepted(session_id: u64) -> Self {
-        Self {
-            session_id,
-            reason: String::new(),
-        }
+        Self { session_id, reason: String::new() }
     }
 
     /// 构造「拒绝」应答。
     #[must_use]
     pub fn rejected(reason: impl Into<String>) -> Self {
-        Self {
-            session_id: 0,
-            reason: reason.into(),
-        }
+        Self { session_id: 0, reason: reason.into() }
     }
 
     /// 是否被接受。
@@ -291,13 +278,7 @@ impl Payload for Msg {
         let client_msg_id = r.varint()?;
         let content = Bytes::copy_from_slice(r.bytes()?);
         r.finish()?;
-        Ok(Self {
-            from,
-            to,
-            msg_id,
-            client_msg_id,
-            content,
-        })
+        Ok(Self { from, to, msg_id, client_msg_id, content })
     }
 }
 
@@ -329,10 +310,7 @@ impl Payload for MsgAck {
         let msg_id = r.varint()?;
         let client_msg_id = r.varint()?;
         r.finish()?;
-        Ok(Self {
-            msg_id,
-            client_msg_id,
-        })
+        Ok(Self { msg_id, client_msg_id })
     }
 }
 
@@ -389,10 +367,8 @@ impl Payload for SyncResp {
         let mut cursor: &[u8] = src;
         let mut r = Reader::new(&mut cursor);
         let count = r.varint()?;
-        let count = usize::try_from(count).map_err(|_| ProtocolError::PayloadTooShort {
-            need: usize::MAX,
-            got: r.remaining(),
-        })?;
+        let count = usize::try_from(count)
+            .map_err(|_| ProtocolError::PayloadTooShort { need: usize::MAX, got: r.remaining() })?;
         let mut messages = Vec::with_capacity(count.min(1024));
         for _ in 0..count {
             messages.push(Msg::decode(r.bytes()?)?);
@@ -410,10 +386,7 @@ mod tests {
     /// 全载荷类型的「编码 → 帧往返 → 解码」一致性
     #[test]
     fn roundtrip_all_payloads() {
-        let handshake = Handshake {
-            user_id: 42,
-            token: "secret-token-你好".into(),
-        };
+        let handshake = Handshake { user_id: 42, token: "secret-token-你好".into() };
         assert_eq!(Handshake::decode(&handshake.encode()).unwrap(), handshake);
 
         let ack = HandshakeAck::accepted(12_345_678_901_234_567_890);
@@ -432,13 +405,10 @@ mod tests {
         assert_eq!(Msg::decode(&msg.encode()).unwrap(), msg);
 
         let sync_resp = SyncResp {
-            messages: vec![msg.clone(), Msg {
-                from: 3,
-                to: 4,
-                msg_id: 5,
-                client_msg_id: 6,
-                content: Bytes::new(),
-            }],
+            messages: vec![
+                msg.clone(),
+                Msg { from: 3, to: 4, msg_id: 5, client_msg_id: 6, content: Bytes::new() },
+            ],
         };
         assert_eq!(SyncResp::decode(&sync_resp.encode()).unwrap(), sync_resp);
         // 空列表也是合法载荷（「没有更多了」）
@@ -465,14 +435,8 @@ mod tests {
     /// 命令字错配：拿 Msg 帧去解 Handshake 必须报错
     #[test]
     fn cmd_mismatch_is_rejected() {
-        let frame = Msg {
-            from: 1,
-            to: 2,
-            msg_id: 3,
-            client_msg_id: 4,
-            content: Bytes::new(),
-        }
-        .encode_frame(1, 0);
+        let frame = Msg { from: 1, to: 2, msg_id: 3, client_msg_id: 4, content: Bytes::new() }
+            .encode_frame(1, 0);
         assert!(matches!(
             Handshake::decode_frame(&frame),
             Err(ProtocolError::UnknownCommand { got: 0x05 })
@@ -482,10 +446,7 @@ mod tests {
     /// 截断载荷：每个字段序列都被砍一刀
     #[test]
     fn truncated_payload_is_rejected() {
-        let handshake = Handshake {
-            user_id: 42,
-            token: "token".into(),
-        };
+        let handshake = Handshake { user_id: 42, token: "token".into() };
         let wire = handshake.encode();
         for cut in 0..wire.len() {
             assert!(
@@ -503,10 +464,7 @@ mod tests {
     fn trailing_bytes_are_rejected() {
         let mut wire = MsgAck { msg_id: 1, client_msg_id: 2 }.encode().to_vec();
         wire.extend_from_slice(&[0xDE, 0xAD]);
-        assert!(matches!(
-            MsgAck::decode(&wire),
-            Err(ProtocolError::TrailingBytes { extra: 2 })
-        ));
+        assert!(matches!(MsgAck::decode(&wire), Err(ProtocolError::TrailingBytes { extra: 2 })));
     }
 
     /// 坏 UTF-8：token 字节序列非法时报 `InvalidUtf8`
@@ -517,19 +475,13 @@ mod tests {
         varint::encode_u64(1, &mut wire);
         varint::encode_u64(2, &mut wire);
         wire.extend_from_slice(&[0xFF, 0xFE]);
-        assert!(matches!(
-            Handshake::decode(&wire),
-            Err(ProtocolError::InvalidUtf8)
-        ));
+        assert!(matches!(Handshake::decode(&wire), Err(ProtocolError::InvalidUtf8)));
     }
 
     /// varint 的小数字红利：小 `user_id` 的握手载荷只有几个字节
     #[test]
     fn small_ids_stay_compact() {
-        let hs = Handshake {
-            user_id: 1,
-            token: String::new(),
-        };
+        let hs = Handshake { user_id: 1, token: String::new() };
         // user_id(1) + len(1) + 空 token = 2 字节
         assert_eq!(hs.encode().len(), 2);
     }

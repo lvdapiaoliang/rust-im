@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use im_client::{run_client, ClientConfig, ClientEvent, ClientHandle};
+use im_client::{ClientConfig, ClientEvent, ClientHandle, run_client};
 use im_server::{AllowAll, SessionConfig};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
@@ -48,21 +48,15 @@ async fn login(addr: SocketAddr, user_id: u64, data_dir: PathBuf) -> OnlineClien
     let (events_tx, events_rx) = mpsc::channel(64);
     let (shutdown_tx, shutdown_rx) = im_transport::shutdown_channel();
     let handle = run_client(config, events_tx, shutdown_rx).await;
-    OnlineClient {
-        handle,
-        events: events_rx,
-        shutdown: shutdown_tx,
-    }
+    OnlineClient { handle, events: events_rx, shutdown: shutdown_tx }
 }
 
 /// 等下一个业务事件：跳过两类过程噪音——连接后例行空 `SyncBatch`
 /// （连接层噪音）与 `MessageQueued`（发送过程事件）。
 async fn next_event(events: &mut mpsc::Receiver<ClientEvent>) -> ClientEvent {
     loop {
-        let event = timeout(WAIT, events.recv())
-            .await
-            .expect("2s 内应收到事件")
-            .expect("客户端存活");
+        let event =
+            timeout(WAIT, events.recv()).await.expect("2s 内应收到事件").expect("客户端存活");
         match event {
             ClientEvent::SyncBatch(ref batch) if batch.is_empty() => {}
             ClientEvent::MessageQueued { .. } => {}
@@ -86,10 +80,7 @@ async fn send_and_ack(
     to: u64,
     content: &[u8],
 ) -> u64 {
-    handle
-        .send_msg(to, Bytes::copy_from_slice(content))
-        .await
-        .expect("客户端存活");
+    handle.send_msg(to, Bytes::copy_from_slice(content)).await.expect("客户端存活");
     match next_event(events).await {
         ClientEvent::Ack { msg_id, .. } => msg_id,
         other => panic!("应收到 Ack，实际 {other:?}"),
@@ -128,11 +119,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     expect_connected(&mut bob.events).await;
 
     // Alice → Bob：Bob 收到消息、Alice 收到 Ack，msg_id 一致
-    alice
-        .handle
-        .send_msg(2, Bytes::from_static("第 1 幕：你好 Bob".as_bytes()))
-        .await
-        .unwrap();
+    alice.handle.send_msg(2, Bytes::from_static("第 1 幕：你好 Bob".as_bytes())).await.unwrap();
     let bob_msg = match next_event(&mut bob.events).await {
         ClientEvent::Message(msg) => msg,
         other => panic!("Bob 应收到消息，实际 {other:?}"),
@@ -145,10 +132,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     assert_eq!(ack1, bob_msg.msg_id);
 
     // Bob → Alice：双向都要通
-    bob.handle
-        .send_msg(1, Bytes::from_static("第 1 幕：收到".as_bytes()))
-        .await
-        .unwrap();
+    bob.handle.send_msg(1, Bytes::from_static("第 1 幕：收到".as_bytes())).await.unwrap();
     match next_event(&mut alice.events).await {
         ClientEvent::Message(msg) => {
             assert_eq!(msg.from, 2);
@@ -168,10 +152,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
 
     let id1 = send_and_ack(&alice.handle, &mut alice.events, 2, b"offline 1").await;
     let id2 = send_and_ack(&alice.handle, &mut alice.events, 2, b"offline 2").await;
-    assert!(
-        id1 < id2,
-        "同一机器的雪花 msg_id 应单调递增（{id1} < {id2}）"
-    );
+    assert!(id1 < id2, "同一机器的雪花 msg_id 应单调递增（{id1} < {id2}）");
 
     // ── 第 3 幕：Bob 回来，自动补投 + 恢复双向 ──
     let mut bob = login(addr, 2, bob_dir).await;
@@ -188,10 +169,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     assert_eq!(batch[1].content, Bytes::from_static(b"offline 2"));
 
     // 恢复双向：Bob 回复，Alice 立刻收到
-    bob.handle
-        .send_msg(1, Bytes::from_static("第 3 幕：都收到了".as_bytes()))
-        .await
-        .unwrap();
+    bob.handle.send_msg(1, Bytes::from_static("第 3 幕：都收到了".as_bytes())).await.unwrap();
     match next_event(&mut alice.events).await {
         ClientEvent::Message(msg) => {
             assert_eq!(msg.from, 2);

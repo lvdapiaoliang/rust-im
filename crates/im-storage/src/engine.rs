@@ -126,8 +126,7 @@ fn encode_frame(record: &Record) -> Vec<u8> {
     let body = record.encode();
     let mut out = Vec::with_capacity(body.len() + 8);
     // 帧体长度写入侧同样受 MAX_RECORD_LEN 约束（读侧已拦截超长帧）
-    let len =
-        u32::try_from(body.len()).expect("记录体受 MAX_RECORD_LEN 量级约束");
+    let len = u32::try_from(body.len()).expect("记录体受 MAX_RECORD_LEN 量级约束");
     out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(&crc32::checksum(&body).to_le_bytes());
     out.extend_from_slice(&body);
@@ -200,11 +199,7 @@ impl Engine {
             let file = File::open(&path)?;
             // 索引扫描要读句柄，段结构体也要持句柄做定位读——clone 一份
             let index = build_index(BufReader::new(file.try_clone()?))?;
-            segments.push(SealedSegment {
-                id,
-                file,
-                index,
-            });
+            segments.push(SealedSegment { id, file, index });
         }
 
         // 活跃段 = 新段号（旧段全部封存；路径存在说明上次创建后即崩溃，
@@ -245,10 +240,7 @@ impl Engine {
     ///
     /// 磁盘写失败时返回 [`StorageError::Io`]。
     pub(crate) fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
-        self.append(&Record::Put {
-            key: key.to_vec(),
-            value: value.to_vec(),
-        })?;
+        self.append(&Record::Put { key: key.to_vec(), value: value.to_vec() })?;
         if self.active.count >= SEAL_THRESHOLD {
             self.seal()?;
         }
@@ -378,10 +370,8 @@ impl Engine {
             let mut writer = BufWriter::new(File::create(&path)?);
             for (key, value) in &merged {
                 if let Some(value) = value {
-                    let frame = encode_frame(&Record::Put {
-                        key: key.clone(),
-                        value: value.clone(),
-                    });
+                    let frame =
+                        encode_frame(&Record::Put { key: key.clone(), value: value.clone() });
                     writer.write_all(&frame)?;
                 }
             }
@@ -391,16 +381,9 @@ impl Engine {
         // 原子替换段列表：新段成功写完才删旧段（先写后删的崩溃安全序）
         let file = File::open(&path)?;
         let index = build_index(BufReader::new(file.try_clone()?))?;
-        let old_paths: Vec<PathBuf> = self
-            .segments
-            .iter()
-            .map(|s| segment_path(&self.dir, s.id))
-            .collect();
-        self.segments = vec![SealedSegment {
-            id: new_id,
-            file,
-            index,
-        }];
+        let old_paths: Vec<PathBuf> =
+            self.segments.iter().map(|s| segment_path(&self.dir, s.id)).collect();
+        self.segments = vec![SealedSegment { id: new_id, file, index }];
         for path in old_paths {
             let _ = std::fs::remove_file(path); // 删失败无害：下次 compact 再清
         }
@@ -431,19 +414,13 @@ impl Engine {
         let path = segment_path(&self.dir, old_id);
         let file = File::open(&path)?;
         let index = build_index(BufReader::new(file.try_clone()?))?;
-        self.segments.push(SealedSegment {
-            id: old_id,
-            file,
-            index,
-        });
+        self.segments.push(SealedSegment { id: old_id, file, index });
         self.memtable.clear();
 
         let new_id = self.next_segment;
         self.next_segment += 1;
-        self.active = ActiveSegment {
-            writer: open_append(segment_path(&self.dir, new_id))?,
-            count: 0,
-        };
+        self.active =
+            ActiveSegment { writer: open_append(segment_path(&self.dir, new_id))?, count: 0 };
         Ok(())
     }
 }
@@ -464,11 +441,7 @@ fn parse_segment_name(path: &Path) -> Option<u64> {
 }
 
 fn open_append(path: PathBuf) -> Result<BufWriter<File>, StorageError> {
-    let file = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .create(true)
-        .open(path)?;
+    let file = OpenOptions::new().read(true).append(true).create(true).open(path)?;
     Ok(BufWriter::new(file))
 }
 

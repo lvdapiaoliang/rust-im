@@ -60,10 +60,10 @@ pub use connection::{Connection, ReadHalf, WriteHalf};
 pub use dedup::{DedupWindow, Verdict, WINDOW_SIZE};
 pub use error::TransportError;
 pub use gateway::{
-    run_gateway_connection, spawn_gateway, ConnectionHandle, GatewayConfig, HeartbeatPolicy,
-    InboundFrame, DEFAULT_IDLE_TIMEOUT,
+    ConnectionHandle, DEFAULT_IDLE_TIMEOUT, GatewayConfig, HeartbeatPolicy, InboundFrame,
+    run_gateway_connection, spawn_gateway,
 };
-pub use shutdown::{shutdown_channel, ShutdownRx, ShutdownTx};
+pub use shutdown::{ShutdownRx, ShutdownTx, shutdown_channel};
 
 pub use echo::{
     run_echo_client, run_echo_server, serve_connection, spawn_echo_server_on_random_port,
