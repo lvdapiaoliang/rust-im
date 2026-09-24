@@ -18,6 +18,7 @@ use rand::rngs::OsRng;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::{id_i64, id_u64};
 use crate::session::Sessions;
 
 /// 账号域错误。
@@ -57,7 +58,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for User {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         Ok(Self {
-            id: u64::try_from(row.try_get::<i64, _>("id")?).expect("雪花 ID 装得下 u64"),
+            id: id_u64(row.try_get::<i64, _>("id")?),
             username: row.try_get("username")?,
             display_name: row.try_get("display_name")?,
         })
@@ -121,7 +122,7 @@ impl AccountStore {
              VALUES ($1, $2, $3, $4)
              RETURNING id, username, display_name",
         )
-        .bind(i64::try_from(id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(id))
         .bind(&username)
         .bind(&password_hash)
         .bind(display_name.trim())
@@ -171,11 +172,7 @@ impl AccountStore {
 
         if let Some((id, username, display_name, password_hash)) = row {
             if verify_password(password, &password_hash) {
-                Ok(User {
-                    id: u64::try_from(id).expect("雪花 ID 装得下 u64"),
-                    username,
-                    display_name,
-                })
+                Ok(User { id: id_u64(id), username, display_name })
             } else {
                 Err(AccountError::BadCredentials)
             }
@@ -203,7 +200,7 @@ impl AccountStore {
              VALUES ($1, $2, now() + make_interval(secs => $3))",
         )
         .bind(&token)
-        .bind(i64::try_from(user_id).expect("雪花 ID 装得下 i64"))
+        .bind(id_i64(user_id))
         .bind(ttl_secs)
         .execute(&self.pool)
         .await?;
@@ -252,7 +249,7 @@ impl AccountStore {
     /// 用户 ID 超出 `i64` 范围时 panic（发号器保证不会发生）。
     pub async fn revoke_all_tokens(&self, user_id: u64) -> Result<u64, AccountError> {
         let deleted = sqlx::query("DELETE FROM tokens WHERE user_id = $1")
-            .bind(i64::try_from(user_id).expect("雪花 ID 装得下 i64"))
+            .bind(id_i64(user_id))
             .execute(&self.pool)
             .await?
             .rows_affected();

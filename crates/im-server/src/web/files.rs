@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
-use super::id_i64;
+use super::{id_i64, id_u64};
 use crate::session::Sessions;
 
 /// 文件域错误。
@@ -135,9 +135,8 @@ impl FileStore {
         .fetch_one(&self.pool)
         .await
         // DB 失败时尽力删掉孤儿文件（删不掉也无害，只是占磁盘）
-        .map_err(|e| {
+        .inspect_err(|_| {
             let _ = std::fs::remove_file(&path);
-            e
         })?;
         Ok(meta)
     }

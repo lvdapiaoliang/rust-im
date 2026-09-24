@@ -247,7 +247,9 @@ pub struct AddMemberReq {
 // ────────────────────────────────────────────────────────────────
 
 /// 组 REST 路由（CORS 全开：开发期 Vite 5173 跨域直连；生产由反向代理同源收口）。
-#[must_use]
+///
+/// 注：不加 `#[must_use]`——`Router` 自带 must_use，叠加会触发
+/// `clippy::double_must_use`。
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/register", post(register))
@@ -366,7 +368,7 @@ async fn list_friends(
     Ok(Json(friends))
 }
 
-/// DELETE /api/friends/{user_id}：删除好友（双向对称）。
+/// `DELETE /api/friends/{user_id}`：删除好友（双向对称）。
 async fn delete_friend(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -489,12 +491,15 @@ fn sanitize_filename(name: &str) -> String {
 
 /// `filename*` 的 RFC 5987 百分号编码（非 ASCII 文件名用）。
 fn url_friendly(name: &str) -> String {
+    use std::fmt::Write as _;
+
     let mut out = String::with_capacity(name.len() * 2);
     for byte in name.as_bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
             out.push(*byte as char);
         } else {
-            out.push_str(&format!("%{byte:02X}"));
+            // 百分号编码：write! 直接写入目标，避免中间分配临时 String
+            let _ = write!(out, "%{byte:02X}");
         }
     }
     out
@@ -712,7 +717,7 @@ mod tests {
         cleanup(&pool, &[&name_a, &name_b], &root).await;
     }
 
-    /// 群流程：建群 → 群主拉人 → 双方都在 my_groups；非群主拉人 403
+    /// 群流程：建群 → 群主拉人 → 双方都在 `my_groups`；非群主拉人 403
     #[tokio::test]
     async fn group_member_flow() {
         let Some((app, pool, root)) = app_or_skip().await else {
