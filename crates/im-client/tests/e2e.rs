@@ -156,7 +156,10 @@ async fn online_chat_then_offline_catchup_and_resume() {
     );
 
     // ── 第 3 幕：Bob 回来，自动补投 + 恢复双向 ──
-    eprintln!("[probe] act3 bob back");
+    eprintln!(
+        "[probe] act3 bob back, offline_count(2) = {}",
+        _sessions.offline_count(2)
+    );
     let mut bob = login(addr, 2).await;
     expect_connected(&mut bob.events).await;
     eprintln!("[probe] act3 bob connected, waiting sync");
