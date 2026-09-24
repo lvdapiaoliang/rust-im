@@ -613,7 +613,7 @@ mod tests {
         }
     }
 
-    /// 主线：`welcome`（session_id 非零）→ 双端互发 → 对端收 `msg`、本端收 `msg_ack`。
+    /// 主线：`welcome`（`session_id` 非零）→ 双端互发 → 对端收 `msg`、本端收 `msg_ack`。
     #[tokio::test]
     async fn welcome_and_msg_roundtrip() {
         let Some((url, state)) = ws_server_or_skip().await else {
