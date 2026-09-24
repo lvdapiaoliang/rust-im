@@ -18,4 +18,6 @@
 
 pub mod echo;
 
-pub use echo::{run_echo_client, run_echo_server, serve_connection};
+pub use echo::{
+    run_echo_client, run_echo_server, serve_connection, spawn_echo_server_on_random_port,
+};

@@ -1,6 +1,4 @@
 # rustfmt 配置：保持官方默认风格的少量定制
 edition = "2024"
 max_width = 100
-# 中文注释可能较长，单行注释放宽
-comment_width = 110
 use_small_heuristics = "Max"

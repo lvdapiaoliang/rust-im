@@ -20,9 +20,8 @@ fn main() -> anyhow::Result<()> {
     match task {
         Task::Test => {
             // 直接调用 cargo，保持与开发者手动执行一致的行为
-            let status = std::process::Command::new("cargo")
-                .args(["test", "--workspace"])
-                .status()?;
+            let status =
+                std::process::Command::new("cargo").args(["test", "--workspace"]).status()?;
             anyhow::ensure!(status.success(), "cargo test 失败：{status}");
             Ok(())
         }
