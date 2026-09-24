@@ -398,14 +398,19 @@ mod tests {
     const WAIT: Duration = Duration::from_secs(2);
 
     /// 起完整服务端（随机端口，AllowAll 认证）。
+    ///
+    /// 关停信号语义是「sender 全部 drop = 视为已关停」，而本辅助函数返回后
+    /// 局部的 shutdown_tx 会被 drop——服务端会立即退场。泄漏这一份 sender
+    /// 保活（watch::Sender 极小，测试进程内泄漏无害）。
     async fn server() -> SocketAddr {
-        let (addr, _sessions, _shutdown) =
+        let (addr, _sessions, shutdown) =
             im_server::spawn_server(SessionConfig {
                 authenticator: std::sync::Arc::new(AllowAll),
                 ..SessionConfig::default()
             })
             .await
             .expect("服务应能启动");
+        std::mem::forget(shutdown);
         addr
     }
 
