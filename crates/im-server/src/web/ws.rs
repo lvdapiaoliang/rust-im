@@ -44,7 +44,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::session::{Sessions, SessionState, handle_frame, reply};
+use crate::session::{SessionState, Sessions, handle_frame, reply};
 use crate::sink::{FrameSink, SendFuture};
 
 use super::api::AppState;
@@ -97,7 +97,7 @@ struct Envelope {
 }
 
 /// 出站信封（组装即序列化，通道里传文本——与 WS 文本帧同形态）。
-fn outbound_envelope(kind: &str, seq: u64, ack: u64, payload: Value) -> String {
+fn outbound_envelope(kind: &str, seq: u64, ack: u64, payload: &Value) -> String {
     serde_json::to_string(&json!({
         "type": kind,
         "seq": seq,
@@ -109,7 +109,7 @@ fn outbound_envelope(kind: &str, seq: u64, ack: u64, payload: Value) -> String {
 
 /// 协议错误信封：连接保持，前端按 code 提示。
 fn error_envelope(code: &str, message: &str) -> String {
-    outbound_envelope(envelope_type::ERROR, 0, 0, json!({ "code": code, "message": message }))
+    outbound_envelope(envelope_type::ERROR, 0, 0, &json!({ "code": code, "message": message }))
 }
 
 /// 入站 ID 取值：宽容接受字符串（推荐，见模块文档）或数字。
@@ -182,7 +182,7 @@ fn frame_to_envelope(frame: &Frame) -> Option<String> {
         // 传输层帧不进业务通道；未知命令字在解码边界已被拦截
         Cmd::Handshake | Cmd::Ping | Cmd::Pong | Cmd::SyncReq => return None,
     };
-    Some(outbound_envelope(kind, frame.seq, frame.ack, payload))
+    Some(outbound_envelope(kind, frame.seq, frame.ack, &payload))
 }
 
 /// 上行信封 → 帧。`Ok(None)` = 非业务类型（ping 等，调用方就地处理）；
@@ -248,10 +248,7 @@ impl FrameSink for WsSink {
             let Some(text) = frame_to_envelope(&frame) else {
                 return Ok(());
             };
-            self.tx
-                .send(Outbound::Text(text))
-                .await
-                .map_err(|_| TransportError::Closed)
+            self.tx.send(Outbound::Text(text)).await.map_err(|_| TransportError::Closed)
         })
     }
 }
@@ -305,11 +302,12 @@ async fn handle_socket(state: AppState, user_id: u64, socket: WebSocket) {
     // 「握手」只剩注册与会话 ID 分配（TCP 路径的其余握手职责都已被
     // HTTP 升级吸收）；失败也走 welcome 信封告知原因后关闭——
     // 客户端要能区分「令牌无效」与「已在别处登录」
-    let welcome = match (sessions.next_id().await, sessions.register(user_id, conn_id, Arc::clone(&sink))) {
-        (Some(session_id), Ok(())) => HandshakeAck::accepted(session_id),
-        (Some(_), Err(_)) => HandshakeAck::rejected("already online"),
-        (None, _) => HandshakeAck::rejected("id generator unavailable"),
-    };
+    let welcome =
+        match (sessions.next_id().await, sessions.register(user_id, conn_id, Arc::clone(&sink))) {
+            (Some(session_id), Ok(())) => HandshakeAck::accepted(session_id),
+            (Some(_), Err(_)) => HandshakeAck::rejected("already online"),
+            (None, _) => HandshakeAck::rejected("id generator unavailable"),
+        };
     if reply(&mut session, &sink, &welcome).await.is_err() {
         return; // 连接已死：直接收尾
     }
@@ -335,8 +333,8 @@ async fn handle_socket(state: AppState, user_id: u64, socket: WebSocket) {
             }
             inbound = inbound.next() => {
                 match inbound {
-                    None | Some(Err(_)) => break, // 对端关闭或协议错误
-                    Some(Ok(Message::Close(_))) => break,
+                    // 对端关闭、协议错误、Close 帧：连接生命周期终结
+                    None | Some(Err(_) | Ok(Message::Close(_))) => break,
                     Some(Ok(Message::Ping(data))) => {
                         // 浏览器不发 Ping，但非浏览器客户端可能发——照回不误
                         let _ = tx.try_send(Outbound::Pong(data));
@@ -385,13 +383,12 @@ async fn dispatch_inbound(
         }
         Ok(None) => {
             // 应用层心跳：回显对端 seq，前端按它配对
-            let pong = outbound_envelope(envelope_type::PONG, env.seq, 0, json!({}));
+            let pong = outbound_envelope(envelope_type::PONG, env.seq, 0, &json!({}));
             let _ = tx.try_send(Outbound::Text(pong));
             return;
         }
         Ok(Some(frame)) => frame,
     };
-
     // 帧级去重：与 TCP 路径同一窗口同一语义（重发/乱序在业务前被挡下）
     match session.feed_seq(frame.seq) {
         im_transport::Verdict::Duplicate | im_transport::Verdict::TooFar { .. } => return,
@@ -486,20 +483,11 @@ mod tests {
     /// 翻译层：未知类型回错误；ping 不产生业务帧。
     #[test]
     fn unknown_type_and_ping() {
-        let unknown = Envelope {
-            kind: "wat".to_string(),
-            seq: 1,
-            ack: 0,
-            payload: json!({}),
-        };
+        let unknown = Envelope { kind: "wat".to_string(), seq: 1, ack: 0, payload: json!({}) };
         assert_eq!(envelope_to_frame(&unknown), Err("未知信封类型"));
 
-        let ping = Envelope {
-            kind: envelope_type::PING.to_string(),
-            seq: 2,
-            ack: 0,
-            payload: json!({}),
-        };
+        let ping =
+            Envelope { kind: envelope_type::PING.to_string(), seq: 2, ack: 0, payload: json!({}) };
         assert!(envelope_to_frame(&ping).expect("ping 不该报错").is_none());
     }
 
@@ -528,14 +516,14 @@ mod tests {
     use std::time::Duration;
 
     use tokio::net::TcpListener;
-    use tokio_tungstenite::tungstenite::http::StatusCode as HttpCode;
     use tokio_tungstenite::tungstenite::Message as TgMessage;
+    use tokio_tungstenite::tungstenite::http::StatusCode as HttpCode;
     use tokio_tungstenite::{connect_async, tungstenite};
 
     /// 测试等待上限：本地回环上任何正常交互都应远快于此。
     const WAIT: Duration = Duration::from_secs(5);
 
-    /// 起 WS 测试服务：迁移到位的 AppState + 随机端口的 axum 服务。
+    /// 起 WS 测试服务：迁移到位的 `AppState` + 随机端口的 axum 服务。
     async fn ws_server_or_skip() -> Option<(String, AppState)> {
         let pool = pool_or_skip().await?;
         let root = std::env::temp_dir().join(format!("im-ws-{}", uuid::Uuid::new_v4()));
@@ -588,7 +576,7 @@ mod tests {
         /// 发一个信封（`seq` 自动填）。
         async fn send(&mut self, kind: &str, payload: Value) {
             let seq = self.next_seq();
-            let text = outbound_envelope(kind, seq, 0, payload);
+            let text = outbound_envelope(kind, seq, 0, &payload);
             self.stream.send(TgMessage::Text(text.into())).await.expect("发送应成功");
         }
 
@@ -625,15 +613,17 @@ mod tests {
         }
     }
 
-    /// 主线：welcome（session_id 非零）→ 双端互发 → 对端收 msg、本端收 msg_ack。
+    /// 主线：`welcome`（session_id 非零）→ 双端互发 → 对端收 `msg`、本端收 `msg_ack`。
     #[tokio::test]
     async fn welcome_and_msg_roundtrip() {
         let Some((url, state)) = ws_server_or_skip().await else {
             eprintln!("skip: PostgreSQL 不可达");
             return;
         };
-        let (id_a, token_a) = user_with_token(&state, &format!("ws_a_{}", uuid::Uuid::new_v4().simple())).await;
-        let (id_b, token_b) = user_with_token(&state, &format!("ws_b_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_a, token_a) =
+            user_with_token(&state, &format!("ws_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_b, token_b) =
+            user_with_token(&state, &format!("ws_b_{}", uuid::Uuid::new_v4().simple())).await;
 
         let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
         let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
@@ -736,7 +726,8 @@ mod tests {
             eprintln!("skip: PostgreSQL 不可达");
             return;
         };
-        let (_id, token) = user_with_token(&state, &format!("ws_bad_{}", uuid::Uuid::new_v4().simple())).await;
+        let (_id, token) =
+            user_with_token(&state, &format!("ws_bad_{}", uuid::Uuid::new_v4().simple())).await;
         let mut client = WsClient::connect(&format!("{url}?token={token}")).await;
         let _ = client.recv().await; // 消化 welcome
 

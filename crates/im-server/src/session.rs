@@ -359,7 +359,7 @@ impl SessionState {
     /// 已认证状态（WS 路径：鉴权在 HTTP 升级前完成，无需握手帧）。
     ///
     /// 与 `handle_handshake` 成功后的状态等价——同一条状态机的两个入口，
-/// 剩余生命周期（去重、消息、同步、回执 seq）完全共用。
+    /// 剩余生命周期（去重、消息、同步、回执 seq）完全共用。
     pub(crate) fn authenticated(user_id: u64) -> Self {
         Self { user: Some(user_id), send_seq: 0, dedup: None }
     }
