@@ -531,18 +531,23 @@ async fn handle_msg(
         return;
     };
 
-    // from 由服务端裁决（客户端伪造无效）；content 的 `Bytes`
-    // 零拷贝传递给转发路径
+    // from 由服务端裁决（客户端伪造无效）；`client_msg_id` 是客户端
+    // 去重键，透传不解释；content 的 `Bytes` 零拷贝传递给转发路径
     let outgoing = Msg {
         from,
         to: upstream.to,
         msg_id,
+        client_msg_id: upstream.client_msg_id,
         content: upstream.content,
     };
     sessions.deliver(&outgoing).await;
 
-    // 消息级确认：告诉发送方全局 msg_id（本地排序/去重/同步游标都用它）
-    let ack = MsgAck { msg_id };
+    // 消息级确认：`msg_id` 供排序/同步游标，`client_msg_id` 供发送方
+    // 核销重发表（重发会换新 `msg_id`，只有客户端键跨重发稳定）
+    let ack = MsgAck {
+        msg_id,
+        client_msg_id: upstream.client_msg_id,
+    };
     let _ = reply(state, handle, &ack).await;
 }
 
@@ -644,6 +649,8 @@ mod tests {
     struct TestClient {
         conn: Connection,
         seq: u64,
+        /// 本地去重键计数器（模拟真实客户端的 client_msg_id 生成器）。
+        client_msg_id: u64,
     }
 
     impl TestClient {
@@ -651,6 +658,7 @@ mod tests {
             Self {
                 conn: Connection::connect(&addr.to_string()).await.unwrap(),
                 seq: 0,
+                client_msg_id: 0,
             }
         }
 
@@ -686,10 +694,12 @@ mod tests {
 
         /// 发一条上行消息（`from`/`msg_id` 留给服务端裁决）。
         async fn send_msg(&mut self, to: u64, content: &[u8]) {
+            self.client_msg_id += 1;
             let msg = Msg {
                 from: 0,
                 to,
                 msg_id: 0,
+                client_msg_id: self.client_msg_id,
                 content: Bytes::copy_from_slice(content),
             };
             let frame = msg.encode_frame(self.next_seq(), 0);
@@ -827,6 +837,7 @@ mod tests {
             from: 0,
             to: 2,
             msg_id: 0,
+            client_msg_id: 1,
             content: Bytes::from_static(b"dup"),
         };
         let frame = msg.encode_frame(2, 0); // handshake 用了 seq=1，此处 seq=2

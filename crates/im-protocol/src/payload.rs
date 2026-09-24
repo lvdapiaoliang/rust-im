@@ -251,6 +251,11 @@ impl Payload for HandshakeAck {
 /// - 下行（服务端 → 客户端）：`from` 为真实发送者；
 /// - `msg_id` 是**服务端分配的全局消息 ID**（雪花）：接收端用它去重与
 ///   排序，离线同步按它游标拉取；
+/// - `client_msg_id` 是**客户端本地生成的去重键**：客户端超时重发时，
+///   服务端会再次分配新的 `msg_id`——去重不能靠服务端 ID，只能靠
+///   发送方自己生成的稳定键。接收端按 `(from, client_msg_id)` 去重；
+///   服务端透传不解释（阶段 4 引入，这正是协议演化要考虑的兼容点：
+///   生产上应做成可选字段或版本协商，本项目尚无外部用户，直接加字段）；
 /// - `content` 用 [`Bytes`]：服务端转发时直接传递零拷贝句柄（享元）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Msg {
@@ -260,6 +265,8 @@ pub struct Msg {
     pub to: u64,
     /// 服务端分配的全局消息 ID（雪花 ID）。
     pub msg_id: u64,
+    /// 客户端本地生成的去重键（重发不变，服务端透传）。
+    pub client_msg_id: u64,
     /// 消息内容（零拷贝句柄）。
     pub content: Bytes,
 }
@@ -271,6 +278,7 @@ impl Payload for Msg {
         varint::encode_u64(self.from, dst);
         varint::encode_u64(self.to, dst);
         varint::encode_u64(self.msg_id, dst);
+        varint::encode_u64(self.client_msg_id, dst);
         put_bytes(dst, &self.content);
     }
 
@@ -280,12 +288,14 @@ impl Payload for Msg {
         let from = r.varint()?;
         let to = r.varint()?;
         let msg_id = r.varint()?;
+        let client_msg_id = r.varint()?;
         let content = Bytes::copy_from_slice(r.bytes()?);
         r.finish()?;
         Ok(Self {
             from,
             to,
             msg_id,
+            client_msg_id,
             content,
         })
     }
@@ -293,13 +303,16 @@ impl Payload for Msg {
 
 /// `MsgAck` 载荷：服务端对一条上行消息的确认。
 ///
-/// 帧头的 `ack` 字段是**帧级**累计确认（传输层）；这里的 `msg_id` 是
-/// **消息级**确认（业务层：服务端已落盘/已排队投递）。两层确认
-/// 各管各的语义，不要合并——这正是 TCP 的 ACK 与 HTTP 的 200 的关系。
+/// 帧头的 `ack` 字段是**帧级**累计确认（传输层）；这里两个 ID 是
+/// **消息级**确认（业务层：服务端已接管消息）。两层确认各管各的
+/// 语义，不要合并——这正是 TCP 的 ACK 与 HTTP 的 200 的关系。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MsgAck {
-    /// 被确认的消息 ID。
+    /// 被确认的消息 ID（服务端分配的全局 ID）。
     pub msg_id: u64,
+    /// 被确认消息的客户端去重键——发送方用它核销重发表：
+    /// 重发会产生新的 `msg_id`，只有 `client_msg_id` 跨重发稳定。
+    pub client_msg_id: u64,
 }
 
 impl Payload for MsgAck {
@@ -307,14 +320,19 @@ impl Payload for MsgAck {
 
     fn encode_into(&self, dst: &mut impl BufMut) {
         varint::encode_u64(self.msg_id, dst);
+        varint::encode_u64(self.client_msg_id, dst);
     }
 
     fn decode(src: &[u8]) -> Result<Self, ProtocolError> {
         let mut cursor: &[u8] = src;
         let mut r = Reader::new(&mut cursor);
         let msg_id = r.varint()?;
+        let client_msg_id = r.varint()?;
         r.finish()?;
-        Ok(Self { msg_id })
+        Ok(Self {
+            msg_id,
+            client_msg_id,
+        })
     }
 }
 
@@ -408,6 +426,7 @@ mod tests {
             from: 1,
             to: 2,
             msg_id: u64::MAX,
+            client_msg_id: u64::MAX - 1,
             content: Bytes::from_static(b"hello, \xE4\xB8\x96\xE7\x95\x8C"),
         };
         assert_eq!(Msg::decode(&msg.encode()).unwrap(), msg);
@@ -417,6 +436,7 @@ mod tests {
                 from: 3,
                 to: 4,
                 msg_id: 5,
+                client_msg_id: 6,
                 content: Bytes::new(),
             }],
         };
@@ -433,6 +453,7 @@ mod tests {
             from: 7,
             to: 8,
             msg_id: 9,
+            client_msg_id: 10,
             content: Bytes::from_static(b"via-frame"),
         };
         let frame = msg.encode_frame(3, 0);
@@ -448,6 +469,7 @@ mod tests {
             from: 1,
             to: 2,
             msg_id: 3,
+            client_msg_id: 4,
             content: Bytes::new(),
         }
         .encode_frame(1, 0);
@@ -479,7 +501,7 @@ mod tests {
     /// 尾部多余字节：完整载荷后追加垃圾必须报 `TrailingBytes`
     #[test]
     fn trailing_bytes_are_rejected() {
-        let mut wire = MsgAck { msg_id: 1 }.encode().to_vec();
+        let mut wire = MsgAck { msg_id: 1, client_msg_id: 2 }.encode().to_vec();
         wire.extend_from_slice(&[0xDE, 0xAD]);
         assert!(matches!(
             MsgAck::decode(&wire),
@@ -517,11 +539,12 @@ mod tests {
     fn msg_roundtrip_property() {
         use proptest::prelude::*;
 
-        proptest!(|(from in any::<u64>(), to in any::<u64>(), msg_id in any::<u64>(), content in any::<Vec<u8>>())| {
+        proptest!(|(from in any::<u64>(), to in any::<u64>(), msg_id in any::<u64>(), client_msg_id in any::<u64>(), content in any::<Vec<u8>>())| {
             let msg = Msg {
                 from,
                 to,
                 msg_id,
+                client_msg_id,
                 content: Bytes::from(content),
             };
             prop_assert_eq!(Msg::decode(&msg.encode()).unwrap(), msg);
@@ -536,6 +559,7 @@ mod tests {
                 from: 1,
                 to: 2,
                 msg_id: 1000 + i,
+                client_msg_id: 2000 + i,
                 content: Bytes::from(format!("offline-{i}")),
             })
             .collect();
@@ -552,6 +576,7 @@ mod tests {
             from: 1,
             to: 2,
             msg_id: 3,
+            client_msg_id: 4,
             content: Bytes::from_static(b"flagged"),
         }
         .encode_frame(1, 0);
