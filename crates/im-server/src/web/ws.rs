@@ -262,9 +262,9 @@ impl FrameSink for WsSink {
 
 /// `GET /ws?token=…` 的查询参数。
 #[derive(Debug, Deserialize)]
-struct WsParams {
+pub struct WsParams {
     /// 登录令牌（REST `/api/login` 签发的同一个）。
-    token: Option<String>,
+    pub token: Option<String>,
 }
 
 /// WS 入口：鉴权在升级**之前**——坏令牌连 WebSocket 都不建立
@@ -618,7 +618,7 @@ mod tests {
         let full = format!("{url}?token=not-a-real-token");
         match connect_async(full).await {
             Err(tungstenite::Error::Http(resp)) => {
-                assert_eq!(*resp.status(), HttpCode::UNAUTHORIZED);
+                assert_eq!(resp.status(), HttpCode::UNAUTHORIZED);
             }
             Err(e) => panic!("应为 HTTP 层拒绝: {e}"),
             Ok(_) => panic!("坏令牌不应升级"),
