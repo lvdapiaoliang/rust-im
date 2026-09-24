@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 bytes.workspace = true
+im-protocol.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
