@@ -42,11 +42,26 @@ learning-rust-from-scratch/
 │   ├── 05-图与搜索.md
 │   └── 06-排序与二分.md
 │
-└── 05-patterns/           第 7 周：Rust 设计模式
-    ├── README.md（GoF 在 Rust 中的形态总览）
-    ├── 01-Rust惯用法-NEWTYPE等.md
-    ├── 02-创建型与结构型模式.md
-    └── 03-行为型模式.md
+├── 05-patterns/           第 7 周：Rust 设计模式
+│   ├── README.md（GoF 在 Rust 中的形态总览）
+│   ├── 01-Rust惯用法-NEWTYPE等.md
+│   ├── 02-创建型与结构型模式.md
+│   └── 03-行为型模式.md
+│
+└── 06-official-docs/      随时查阅：官方文档中文导航（12 部全覆盖）
+    ├── README.md（12 部文档总览 + 按学习阶段的使用指南）
+    ├── 01-the-book/      官方入门书（21 章全目录导读）
+    ├── 02-nomicon/       死灵书：unsafe 黑魔法（FFI 前必读）
+    ├── 03-std/           标准库模块地图与查询心法
+    ├── 04-edition-guide/ 版本指南（2024 版重点）
+    ├── 05-cargo/         构建系统（workspace/features）
+    ├── 06-rustdoc/       文档工具（doctest）
+    ├── 07-rustc/         编译器（lint/交叉编译/调优）
+    ├── 08-error-codes/   高频编译错误码中文速查表
+    ├── 09-rust-cli/      命令行应用实战
+    ├── 10-embedded/      嵌入式（仅 FFI/Typestate 章值得读）
+    ├── 11-reference/     语言规范（查询型，中文版完整）
+    └── 12-unstable/      未稳定特性（io_uring 时再查）
 ```
 
 ## 学习路径建议
@@ -59,8 +74,14 @@ learning-rust-from-scratch/
 第 5 周   04-algorithms 01~03     目标：手写哈希表、环形缓冲
 第 6 周   04-algorithms 04~06     目标：手写堆、BFS/DFS、快排/归并
 第 7 周   05-patterns 全部        目标：API 设计有自己的品味
+贯穿全程 06-official-docs       随手查：报错→08，API→03，章节→01
 之后      回到 ../docs/ 实战      知识在 rust-im 项目里全部落地
 ```
+
+> **关于 06-official-docs**：Rust 官方 12 部文档合计数百万英文词，
+> 全文翻译不可行也无必要——那里提供的是**导航索引**：
+> 每部书的完整章节中文导读 + 优先级 + 现成社区中文翻译链接（trpl-zh-cn、
+> rustwiki、nomicon 中文版等），详见[官方文档导航](./06-official-docs/README.md)。
 
 ## 每篇的统一结构
 
