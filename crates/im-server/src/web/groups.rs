@@ -159,6 +159,21 @@ impl GroupStore {
         Ok(())
     }
 
+    /// 群是否存在（WS 消息权限分流：单聊要好友关系，群聊只要群存在）。
+    ///
+    /// 阶段 6 每条消息一次点查；阶段 7 群 actor 上线后换成员快照缓存。
+    ///
+    /// # Errors
+    ///
+    /// 数据库错误（见 [`GroupError::Db`]）。
+    pub async fn is_group(&self, group_id: u64) -> Result<bool, GroupError> {
+        let found: Option<i64> = sqlx::query_scalar("SELECT id FROM groups WHERE id = $1")
+            .bind(id_i64(group_id))
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(found.is_some())
+    }
+
     /// 我加入的群（含自建）。
     ///
     /// # Errors

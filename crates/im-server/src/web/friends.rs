@@ -177,12 +177,19 @@ impl FriendStore {
 
     /// 接受请求（仅收方有权）：改状态 + 插无向边，一个事务内完成。
     ///
+    /// 返回对方的 [`User`]（事件推送的载荷：发起方要知道「谁接受了我」；
+    /// 用户被删等极端情况下返回 `None`——关系已成立，事件能省则省）。
+    ///
     /// # Errors
     ///
     /// 请求不存在 / 不是发向自己 / 已处理过 → [`FriendError::RequestNotFound`]。
-    pub async fn accept_request(&self, request_id: u64, by_user: u64) -> Result<(), FriendError> {
+    pub async fn accept_request(
+        &self,
+        request_id: u64,
+        by_user: u64,
+    ) -> Result<Option<User>, FriendError> {
         let mut tx = self.pool.begin().await?;
-
+    
         // 带状态条件的 UPDATE：天然实现「只有收方能处理 pending 请求」
         let from_user: Option<i64> = sqlx::query_scalar(
             "UPDATE friend_requests SET status = 'accepted'
@@ -193,14 +200,14 @@ impl FriendStore {
         .bind(id_i64(by_user))
         .fetch_optional(&mut *tx)
         .await?;
-
+    
         let Some(from_user) = from_user else {
             // 不回滚也无妨（什么都没改），但显式回滚语义更清晰
             tx.rollback().await?;
             return Err(FriendError::RequestNotFound);
         };
-
-        // 无向边：小 ID 恒在前（表结构 CHECK 兜底）
+    
+        // 无向边：小 ID 恒在前（表结构 CHECK 兕底）
         let a = from_user.min(id_i64(by_user));
         let b = from_user.max(id_i64(by_user));
         // 已是好友（互相发起等场景）：边幂等吞掉，请求状态照常推进
@@ -212,9 +219,17 @@ impl FriendStore {
         .bind(b)
         .execute(&mut *tx)
         .await?;
-
+    
+        // 对方用户信息（事件载荷）：主键点查，与事务无依赖——事务先落地
+        // （关系成立是硬承诺，事件是软补充）
         tx.commit().await?;
-        Ok(())
+        let counterpart = sqlx::query_as::<_, User>(
+            "SELECT id, username, display_name FROM users WHERE id = $1",
+        )
+        .bind(from_user)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(counterpart)
     }
 
     /// 拒绝请求（仅收方有权）。
@@ -259,22 +274,63 @@ impl FriendStore {
 
     /// 删除好友（任一方可删，双向对称）。
     ///
+    /// 返回被删的对端 [`User`]（事件载荷：对方要知道「谁删了我」）。
+    ///
     /// # Errors
     ///
     /// 本就不是好友时返回 [`FriendError::RequestNotFound`]（复用「关系不存在」语义）。
-    pub async fn remove_friend(&self, me: u64, other: u64) -> Result<(), FriendError> {
+    pub async fn remove_friend(&self, me: u64, other: u64) -> Result<Option<User>, FriendError> {
         let a = id_i64(me.min(other));
         let b = id_i64(me.max(other));
+        let mut tx = self.pool.begin().await?;
         let deleted = sqlx::query("DELETE FROM friends WHERE user_a = $1 AND user_b = $2")
             .bind(a)
             .bind(b)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?
             .rows_affected();
         if deleted == 0 {
+            tx.rollback().await?;
             return Err(FriendError::RequestNotFound);
         }
-        Ok(())
+        // 顺手清掉残留的 pending 请求（删好友后重新发起应从干净状态开始）
+        sqlx::query(
+            "DELETE FROM friend_requests
+             WHERE (from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1)",
+        )
+        .bind(id_i64(me))
+        .bind(id_i64(other))
+        .execute(&mut *tx)
+        .await?;
+        // 对方信息（事件载荷）：查完再 commit（同事务视图，避免删后查不到）
+        let counterpart = sqlx::query_as::<_, User>(
+            "SELECT id, username, display_name FROM users WHERE id = $1",
+        )
+        .bind(id_i64(other))
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(counterpart)
+    }
+
+    /// 两用户是否已是好友（消息发送权限校验，阶段 6）。
+    ///
+    /// 无向边恒小 ID 在前的表约束，让这里只需一次索引点查
+    /// （`friends (user_a, user_b)` 主键命中，无 OR 展开）。
+    ///
+    /// # Errors
+    ///
+    /// 数据库错误（见 [`FriendError::Db`]）。
+    pub async fn is_friend(&self, a: u64, b: u64) -> Result<bool, FriendError> {
+        let lo = id_i64(a.min(b));
+        let hi = id_i64(a.max(b));
+        let found: Option<i64> =
+            sqlx::query_scalar("SELECT user_a FROM friends WHERE user_a = $1 AND user_b = $2")
+                .bind(lo)
+                .bind(hi)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(found.is_some())
     }
 
     /// 拉两个用户名（请求视图组装用；任一不存在返回 `None`）。

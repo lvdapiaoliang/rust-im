@@ -289,6 +289,31 @@ impl Sessions {
         self.store_offline(msg.clone());
     }
 
+    /// 推送一条服务端主动事件（好友请求/被接受等，阶段 6）：
+    /// best-effort 直通接收者的 WS 连接。
+    ///
+    /// 与 [`Sessions::deliver`] 的语义差异是刻意为之的（两个可靠性等级）：
+    ///
+    /// - 消息：**不丢**。离线降级 + 重连补投（至少一次）；
+    /// - 事件：**尽力而为**。接收者不在线或传输不支持（TCP/TUI）
+    ///   就放弃，不降级离线——事件的全部价值在于「实时提醒」，
+    ///   过期的好友请求提醒没有意义（下次登录 REST 拉列表时自然
+    ///   看得到）；为其建离线队列反而增加状态与清理负担。
+    ///
+    /// 返回是否送达（诊断与测试用；失败对调用方不构成错误）。
+    pub async fn push_event(&self, user_id: u64, text: String) -> bool {
+        let Some(session) = self.inner.router.get(user_id) else {
+            return false; // 离线：放弃（见上方语义论证）
+        };
+        let seq = session.send_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        // 事件不是协议帧，但下行 seq 仍要占用：保证接收方看到的
+        // seq 单调（它与帧共用一条出站通道，序号空间不能分叉）
+        let envelope = format!(
+            r#"{{"type":"event","seq":{seq},"ack":0,"payload":{text}}}"#
+        );
+        session.sink.send_text(envelope).await.is_ok()
+    }
+
     /// 离线入队：超出上限丢最老的（`VecDeque` 头部 O(1)）。
     fn store_offline(&self, msg: Msg) {
         let max = self.inner.config.max_offline_per_user;
@@ -670,6 +695,27 @@ mod tests {
         }
     }
 
+    /// 支持文本直通的 sink（WS 路径的完整形状：帧 + 事件信封双通道）。
+    /// `Option` 是帧/文本的标签——通道里能区分两种载荷。
+    #[derive(Debug)]
+    struct TestTextSink(mpsc::Sender<Option<im_protocol::Frame>>);
+
+    impl crate::sink::FrameSink for TestTextSink {
+        fn send(&self, frame: im_protocol::Frame) -> crate::sink::SendFuture<'_> {
+            Box::pin(async move {
+                self.0.send(Some(frame)).await.map_err(|_| TransportError::Closed)
+            })
+        }
+
+        fn send_text(&self, _text: String) -> crate::sink::SendFuture<'_> {
+            Box::pin(async move {
+                // 文本直通也走同一条出站通道（与 WsSink 的 Outbound 枚举同构）；
+                // 载荷本身不进通道——测试只关心「到没到」
+                self.0.send(None).await.map_err(|_| TransportError::Closed)
+            })
+        }
+    }
+
     impl TestClient {
         async fn connect(addr: SocketAddr) -> Self {
             Self {
@@ -759,6 +805,35 @@ mod tests {
         let decoded = Msg::decode_frame(&frame).expect("载荷应与命令字匹配");
         assert_eq!(decoded.msg_id, 7);
         assert_eq!(decoded.content, Bytes::from_static(b"via-custom-sink"));
+    }
+
+    /// 事件推送三态：在线的文本 sink 送达 / 在线的普通 sink（不支持文本）
+    /// 返回 false / 离线直接 false——且事件不进离线队列（与消息的可靠性等级差异）。
+    #[tokio::test]
+    async fn push_event_is_best_effort_and_never_offline() {
+        let sessions = Sessions::new(test_config());
+
+        // 在线 + 支持文本直通：送达 true
+        let (tx, mut rx) = mpsc::channel(4);
+        sessions.register(1, 1, Arc::new(TestTextSink(tx))).expect("首个注册不应冲突");
+        assert!(sessions.push_event(1, r#"{"kind":"friend_request"}"#.to_string()).await);
+        assert!(
+            timeout(Duration::from_millis(300), rx.recv()).await.ok().flatten().is_some(),
+            "文本直通应到达出站通道"
+        );
+
+        // 在线但不支持文本（TCP/TUI 路径）：false，连接不受影响
+        let (tx2, mut rx2) = mpsc::channel(4);
+        sessions.register(2, 2, Arc::new(TestSink(tx2))).expect("首个注册不应冲突");
+        assert!(!sessions.push_event(2, "{}".to_string()).await);
+        assert!(
+            timeout(Duration::from_millis(300), rx2.recv()).await.is_err(),
+            "事件不应走帧通道"
+        );
+
+        // 离线：false，且不产生离线积压（事件不降级）
+        assert!(!sessions.push_event(3, "{}".to_string()).await);
+        assert_eq!(sessions.offline_count(3), 0, "事件不进离线队列");
     }
 
     /// 握手成功：`session_id` 是雪花 ID（非零），路由表 +1。

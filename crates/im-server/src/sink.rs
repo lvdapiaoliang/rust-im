@@ -49,6 +49,27 @@ pub trait FrameSink: Send + Sync + Debug {
     /// 连接已死（对端关闭/写通道退役）时返回 [`TransportError::Closed`]，
     /// 调用方（如 [`crate::session::Sessions::deliver`]）据此降级为离线入队。
     fn send(&self, frame: Frame) -> SendFuture<'_>;
+
+    /// 直通一段传输层原生文本（阶段 6 事件推送专用）。
+    ///
+    /// 需求背景：好友请求/被接受等**服务端主动事件**不是协议帧
+    /// （`im-protocol` 没有 `Event` 命令字——业务事件不该膨胀二进制协议），
+    /// 它们只在 Web 接入路径存在，形态是 JSON 信封文本。
+    /// TCP 路径（TUI）没有事件语义，显式拒绝而非静默吞掉——
+    /// 调用方（REST 处理器）据此知道「这个用户收不到事件」。
+    ///
+    /// 同一 trait 承载「帧」与「原生文本」两条通道，是适配器模式的
+    /// 一次扩展：会话核心与 REST 层都只认 `FrameSink`，不必关心
+    /// 对面是浏览器还是 TUI。
+    ///
+    /// # Errors
+    ///
+    /// 传输不支持文本直通（TCP 路径）或连接已死时返回
+    /// [`TransportError::Closed`]；事件是 best-effort，调用方不重试。
+    fn send_text(&self, _text: String) -> SendFuture<'_> {
+        // 默认实现 = 本传输不支持：装箱一个立即失败的 future
+        Box::pin(async { Err(TransportError::Closed) })
+    }
 }
 
 impl FrameSink for ConnectionHandle {
@@ -102,6 +123,17 @@ mod tests {
         drop(rx);
 
         let result = sink.send(Frame::new(Cmd::Msg, 1, 0, Bytes::new())).await;
+        assert!(matches!(result, Err(TransportError::Closed)));
+    }
+
+    /// 默认 `send_text` = 不支持：TCP 适配器（未覆写）应拒绝文本直通，
+    /// 调用方据此知道该用户收不到 Web 事件（阶段 6 语义）
+    #[tokio::test]
+    async fn default_send_text_rejects_with_closed() {
+        let (tx, _rx) = mpsc::channel(4);
+        let sink = ChannelSink(tx); // 未覆写 send_text：走默认实现
+
+        let result = sink.send_text("{}".to_string()).await;
         assert!(matches!(result, Err(TransportError::Closed)));
     }
 
