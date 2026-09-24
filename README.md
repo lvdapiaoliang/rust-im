@@ -4,15 +4,16 @@
 
 ## 项目状态
 
-**阶段 0 已完成**：Cargo workspace 骨架 + Tokio echo server/client（首个学习载体）。
+**阶段 0~3 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）
+加最小客户端，全链路 e2e 测试跑通。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | 0 | workspace 骨架 + echo 热身 | ✅ |
-| 1 | 二进制协议（帧编解码 / 粘包处理） | ⬜ |
-| 2 | 传输层（心跳 / 重连 / seq-ACK / TLS） | ⬜ |
-| 3 | 服务端（网关 / 路由 / 扇出 / 持久化） | ⬜ |
-| 4 | 客户端（TUI / 消息同步） | ⬜ |
+| 1 | 二进制协议（帧编解码 / 粘包处理） | ✅ |
+| 2 | 传输层（心跳 / 重连 / seq-ACK / 优雅关闭；TLS 移至阶段 7 前置） | ✅ |
+| 3 | 服务端（认证 / 会话路由 / 离线补投 / 雪花 ID）+ 最小客户端 | ✅ |
+| 4 | 客户端（TUI / 消息同步 / 本地库） | ⬜ |
 | 5 | 压测（10万 → 100万 → 500万连接三级里程碑） | ⬜ |
 | 6 | FFI SDK（C ABI 动态库 / JNI） | ⬜ |
 | 7 | 桌面端（Tauri）+ E2EE（Signal 协议） | ⬜ |
@@ -25,6 +26,8 @@
 cargo test --workspace        # 全量测试
 cargo clippy --workspace --all-targets   # 静态检查（零警告）
 cargo run -p im-transport --example echo_demo   # 运行阶段 0 示例
+cargo run -p im-server                     # 起服务端（默认 127.0.0.1:8888）
+cargo run -p im-client 127.0.0.1:8888 1 demo    # 起客户端（`to 内容` 发消息）
 ```
 
 ## 代码结构
@@ -49,7 +52,10 @@ crates/
 - [01 - 所有权、借用与生命周期](docs/01-rust-core.md)
 - [02 - Send、Sync 与 Pin](docs/02-send-sync-pin.md)
 - [03 - async/await 与 Tokio](docs/03-async-tokio.md)
-- 04~11 随开发阶段逐步补充
+- [04 - 二进制协议设计](docs/04-protocol-design.md)（阶段 1）
+- [05 - 传输层设计](docs/05-network-tokio.md)（阶段 2）
+- [06 - 服务端架构](docs/06-server-arch.md)（阶段 3）
+- 07~11 随开发阶段逐步补充
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 
