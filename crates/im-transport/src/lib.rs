@@ -48,12 +48,14 @@
 //! - `learning-rust-from-scratch/03-tokio/`：select、channel、超时与取消
 
 pub mod connection;
+pub mod dedup;
 pub mod echo;
 pub mod error;
 pub mod gateway;
 pub mod shutdown;
 
 pub use connection::{Connection, ReadHalf, WriteHalf};
+pub use dedup::{DedupWindow, Verdict, WINDOW_SIZE};
 pub use error::TransportError;
 pub use gateway::{
     run_gateway_connection, ConnectionHandle, GatewayConfig, HeartbeatPolicy, InboundFrame,

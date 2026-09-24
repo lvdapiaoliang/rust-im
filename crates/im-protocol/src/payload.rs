@@ -7,7 +7,7 @@
 //! # 设计决定
 //!
 //! - **全部字段用 varint**：与帧头同一编码（复用 [`crate::varint`]），
-//!   user_id/msg_id 这类小数值常态下 1~4 字节；
+//!   `user_id`/`msg_id` 这类小数值常态下 1~4 字节；
 //! - **字符串/字节串 = 长度前缀 + 内容**（`len:varint + bytes`），
 //!   与 Protobuf wire format 一致；
 //! - **解码器是 `&mut &[u8]` 游标**：slice 的「消费」就是重新赋值，
@@ -32,8 +32,8 @@ use crate::varint;
 /// 一个可编码进帧 payload 的消息体。
 ///
 /// 实现方自带命令字（[`Payload::CMD`]），
-/// `encode_frame` 由此构造完整的 [`Frame`]——
-/// 「帧的动词与名词由同一处定义」，杜绝「Cmd::Msg 配上握手载荷」的错配。
+/// [`Payload::encode_frame`] 由此构造完整的 [`Frame`]——
+/// 「帧的动词与名词由同一处定义」，杜绝「`Cmd::Msg` 配上握手载荷」的错配。
 pub trait Payload: Sized {
     /// 本载荷对应的命令字。
     const CMD: Cmd;
@@ -320,11 +320,11 @@ impl Payload for MsgAck {
 
 /// `SyncReq` 载荷：离线消息拉取请求。
 ///
-/// `since` 是「我已经收到的最大 msg_id」，服务端返回它之后的消息——
-/// 游标式同步：断点续传天然成立（重连再发一次同样的 SyncReq 即可）。
+/// `since` 是「我已经收到的最大 `msg_id`」，服务端返回它之后的消息——
+/// 游标式同步：断点续传天然成立（重连再发一次同样的 `SyncReq` 即可）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncReq {
-    /// 游标：拉取 msg_id 严格大于此值的消息。
+    /// 游标：拉取 `msg_id` 严格大于此值的消息。
     pub since: u64,
 }
 
@@ -361,7 +361,9 @@ impl Payload for SyncResp {
     fn encode_into(&self, dst: &mut impl BufMut) {
         varint::encode_u64(self.messages.len() as u64, dst);
         for msg in &self.messages {
-            msg.encode_into(dst);
+            // 每条消息带长度前缀：子载荷自包含，可独立解析/跳过
+            // （对照 Protobuf 嵌套 message 的字段语义）
+            put_bytes(dst, &msg.encode());
         }
     }
 
@@ -396,7 +398,7 @@ mod tests {
         };
         assert_eq!(Handshake::decode(&handshake.encode()).unwrap(), handshake);
 
-        let ack = HandshakeAck::accepted(12345678901234567890);
+        let ack = HandshakeAck::accepted(12_345_678_901_234_567_890);
         assert_eq!(HandshakeAck::decode(&ack.encode()).unwrap(), ack);
         let rejected = HandshakeAck::rejected("bad token");
         assert_eq!(HandshakeAck::decode(&rejected.encode()).unwrap(), rejected);
@@ -424,7 +426,7 @@ mod tests {
         assert_eq!(SyncResp::decode(&empty.encode()).unwrap(), empty);
     }
 
-    /// 帧级往返：encode_frame → decode_frame
+    /// 帧级往返：`encode_frame` → `decode_frame`
     #[test]
     fn frame_roundtrip_via_trait() {
         let msg = Msg {
@@ -474,7 +476,7 @@ mod tests {
         }
     }
 
-    /// 尾部多余字节：完整载荷后追加垃圾必须报 TrailingBytes
+    /// 尾部多余字节：完整载荷后追加垃圾必须报 `TrailingBytes`
     #[test]
     fn trailing_bytes_are_rejected() {
         let mut wire = MsgAck { msg_id: 1 }.encode().to_vec();
@@ -485,7 +487,7 @@ mod tests {
         ));
     }
 
-    /// 坏 UTF-8：token 字节序列非法时报 InvalidUtf8
+    /// 坏 UTF-8：token 字节序列非法时报 `InvalidUtf8`
     #[test]
     fn invalid_utf8_is_rejected() {
         // 手工拼载荷：user_id=1 + len=2 + 0xFF 0xFE（非法 UTF-8）
@@ -499,7 +501,7 @@ mod tests {
         ));
     }
 
-    /// varint 的小数字红利：小 user_id 的握手载荷只有几个字节
+    /// varint 的小数字红利：小 `user_id` 的握手载荷只有几个字节
     #[test]
     fn small_ids_stay_compact() {
         let hs = Handshake {
@@ -526,7 +528,7 @@ mod tests {
         });
     }
 
-    /// SyncResp 大批量消息（模拟离线堆积）的往返
+    /// `SyncResp` 大批量消息（模拟离线堆积）的往返
     #[test]
     fn sync_resp_batch_roundtrip() {
         let messages: Vec<Msg> = (0..500u64)
