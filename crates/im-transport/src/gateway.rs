@@ -175,6 +175,10 @@ pub struct InboundFrame {
 /// # Errors
 ///
 /// 见函数文档正文：连接生命周期内出现的任何失败都会作为返回值上抛。
+///
+/// # Panics
+///
+/// 网关 task panic 时（属实现 bug，应立即暴露）向上传播。
 pub async fn run_gateway_connection(
     stream: TcpStream,
     config: GatewayConfig,

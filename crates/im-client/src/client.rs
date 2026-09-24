@@ -31,8 +31,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
 use im_transport::{
-    shutdown_channel, spawn_gateway, Backoff, GatewayConfig, HeartbeatPolicy, InboundFrame,
-    ShutdownRx,
+    shutdown_channel, spawn_gateway, Backoff, ConnectionHandle, GatewayConfig, HeartbeatPolicy,
+    InboundFrame, ShutdownRx,
 };
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -152,6 +152,7 @@ impl ClientHandle {
 }
 
 /// 一轮连接的结局（驱动外层重连循环的状态转移）。
+#[derive(Debug)]
 enum Outcome {
     /// 连接结束（网络故障/对端关闭/握手超时）：值得重连。
     Disconnected,
@@ -238,12 +239,11 @@ async fn connect_once(
 ) -> (Outcome, u64) {
     // 本轮连接的关停信号：外层 shutdown 或本轮结束时触发，停掉网关
     let (local_shutdown_tx, local_shutdown_rx) = shutdown_channel();
-    let mut outer_shutdown = shutdown.clone();
+    let outer_shutdown = shutdown.clone();
 
     // 1. TCP 连接失败：按普通断线处理（外层退避重试）
-    let stream = match TcpStream::connect(&config.server_addr).await {
-        Ok(s) => s,
-        Err(_) => return (Outcome::Disconnected, last_msg_id),
+    let Ok(stream) = TcpStream::connect(&config.server_addr).await else {
+        return (Outcome::Disconnected, last_msg_id);
     };
 
     // 2. 网关（客户端角色：心跳保活、写 actor、空闲超时）
@@ -273,20 +273,15 @@ async fn connect_once(
         return (Outcome::Disconnected, last_msg_id);
     }
 
-    // 4. 等握手应答（区分「被拒」与「网络故障」——语义不同，处理不同）
-    let ack = match timeout(config.handshake_timeout, frame_rx.recv()).await {
-        Ok(Some(event)) => match HandshakeAck::decode_frame(&event.frame) {
-            Ok(ack) => ack,
-            Err(_) => {
-                // 协议错乱的应答：按断线处理
-                finish_gateway(local_shutdown_tx, gateway_task).await;
-                return (Outcome::Disconnected, last_msg_id);
-            }
-        },
-        Ok(None) | Err(_) => {
-            finish_gateway(local_shutdown_tx, gateway_task).await;
-            return (Outcome::Disconnected, last_msg_id);
-        }
+    // 4. 等握手应答（区分「被拒」与「网络故障」——语义不同，处理不同）。
+    //    超时、通道关闭（网关先退）、应答解码失败一律按断线处理
+    let Ok(Some(event)) = timeout(config.handshake_timeout, frame_rx.recv()).await else {
+        finish_gateway(local_shutdown_tx, gateway_task).await;
+        return (Outcome::Disconnected, last_msg_id);
+    };
+    let Ok(ack) = HandshakeAck::decode_frame(&event.frame) else {
+        finish_gateway(local_shutdown_tx, gateway_task).await;
+        return (Outcome::Disconnected, last_msg_id);
     };
     if !ack.is_accepted() {
         finish_gateway(local_shutdown_tx, gateway_task).await;
@@ -304,7 +299,7 @@ async fn connect_once(
     }
 
     // 5. 离线同步：从上次游标补齐断线期间的消息
-    let mut cursor = last_msg_id;
+    let cursor = last_msg_id;
     send_seq += 1;
     let sync_req = SyncReq { since: last_msg_id };
     if handle.send(sync_req.encode_frame(send_seq, 0)).await.is_err() {
@@ -313,6 +308,35 @@ async fn connect_once(
     }
 
     // 6. 消息循环：命令与入站帧双路 select
+    let (outcome, cursor) = message_loop(
+        events,
+        cmd_rx,
+        outer_shutdown,
+        &handle,
+        &mut frame_rx,
+        &mut send_seq,
+        cursor,
+    )
+    .await;
+
+    finish_gateway(local_shutdown_tx, gateway_task).await;
+    (outcome, cursor)
+}
+
+/// 消息循环：命令与入站帧双路 `select`，直到本轮连接结束。
+///
+/// 返回（结局, 最新同步游标）。退出路径与结局的对应：
+/// 外部关停/命令通道关闭 → `Stopped`；发送失败/网关退出 → `Disconnected`；
+/// 业务层事件通道关闭 → `Stopped`（客户端没有存在意义）。
+async fn message_loop(
+    events: &mpsc::Sender<ClientEvent>,
+    cmd_rx: &mut mpsc::Receiver<ClientCommand>,
+    mut outer_shutdown: ShutdownRx,
+    handle: &ConnectionHandle,
+    frame_rx: &mut mpsc::Receiver<InboundFrame>,
+    send_seq: &mut u64,
+    mut cursor: u64,
+) -> (Outcome, u64) {
     let outcome = loop {
         tokio::select! {
             // 外部关停：退出（网关在 finish_gateway 里收尾）
@@ -321,9 +345,9 @@ async fn connect_once(
             cmd = cmd_rx.recv() => match cmd {
                 Some(ClientCommand::SendMsg { to, content }) => {
                     let msg = Msg { from: 0, to, msg_id: 0, content };
-                    send_seq += 1;
+                    *send_seq += 1;
                     // 发送失败 = 本轮连接已死：交给断线路径
-                    if handle.send(msg.encode_frame(send_seq, 0)).await.is_err() {
+                    if handle.send(msg.encode_frame(*send_seq, 0)).await.is_err() {
                         break Outcome::Disconnected;
                     }
                 }
@@ -374,7 +398,6 @@ async fn connect_once(
         }
     };
 
-    finish_gateway(local_shutdown_tx, gateway_task).await;
     (outcome, cursor)
 }
 
@@ -400,8 +423,8 @@ mod tests {
     /// 起完整服务端（随机端口，AllowAll 认证）。
     ///
     /// 关停信号语义是「sender 全部 drop = 视为已关停」，而本辅助函数返回后
-    /// 局部的 shutdown_tx 会被 drop——服务端会立即退场。泄漏这一份 sender
-    /// 保活（watch::Sender 极小，测试进程内泄漏无害）。
+    /// 局部的 `shutdown_tx` 会被 drop——服务端会立即退场。泄漏这一份 sender
+    /// 保活（`watch::Sender` 极小，测试进程内泄漏无害）。
     async fn server() -> SocketAddr {
         let (addr, _sessions, shutdown) =
             im_server::spawn_server(SessionConfig {
@@ -448,7 +471,7 @@ mod tests {
                 .expect("2s 内应收到事件")
                 .expect("客户端存活");
             match event {
-                ClientEvent::SyncBatch(ref batch) if batch.is_empty() => continue,
+                ClientEvent::SyncBatch(ref batch) if batch.is_empty() => {}
                 other => return other,
             }
         }
@@ -563,10 +586,13 @@ mod tests {
                     } else {
                         let sessions = sessions.clone();
                         let conn_id = sessions.next_conn_id();
-                        let (_tx, rx) = shutdown_channel();
+                        let (shutdown_tx, rx) = shutdown_channel();
                         // move 进 owned clone：serve_connection 借用 sessions，
-                        // 而 tokio::spawn 要求 Future 满足 'static
+                        // 而 tokio::spawn 要求 Future 满足 'static。
+                        // shutdown_tx 也必须 move 进去保活——「sender 全部
+                        // drop = 视为已关停」的语义下，留在外层会立即杀死连接
                         tokio::spawn(async move {
+                            let _keep_alive = shutdown_tx;
                             let _ = im_server::serve_connection(
                                 &sessions,
                                 conn_id,
@@ -664,9 +690,10 @@ mod tests {
                     } else {
                         let sessions = sessions.clone();
                         let conn_id = sessions.next_conn_id();
-                        let (_tx, rx) = shutdown_channel();
-                        // 同上：move 进 owned clone 满足 'static
+                        let (shutdown_tx, rx) = shutdown_channel();
+                        // 同上：owned clone 满足 'static，shutdown_tx 保活进 task
                         tokio::spawn(async move {
+                            let _keep_alive = shutdown_tx;
                             let _ = im_server::serve_connection(
                                 &sessions,
                                 conn_id,
