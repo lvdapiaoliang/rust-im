@@ -16,6 +16,11 @@ im-transport.workspace = true
 im-crypto.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]
+im-server.workspace = true
 
 [[bin]]
 name = "im-client"
