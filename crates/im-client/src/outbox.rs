@@ -218,12 +218,14 @@ impl Outbox {
         self.inflight.iter().map(|m| m.deadline).min()
     }
 
-    /// 在途消息数。
+    /// 在途消息数（测试专用）。
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.inflight.len()
     }
 
-    /// 是否没有在途消息。
+    /// 是否没有在途消息（测试专用）。
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.inflight.is_empty()
     }

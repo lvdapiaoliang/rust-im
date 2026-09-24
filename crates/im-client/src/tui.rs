@@ -41,7 +41,7 @@ use bytes::Bytes;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Color, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
