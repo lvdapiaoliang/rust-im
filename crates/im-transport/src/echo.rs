@@ -44,6 +44,10 @@ const READ_BUF_SIZE: usize = 4096;
 /// 与 Java 不同，Rust 的错误处理是显式的（`io::Result`），
 /// accept 失败时我们选择记录并继续——单次 accept 失败（如 EMFILE，文件描述符耗尽）
 /// 不应杀死整个服务进程，这正是阶段 5 压测时要重点观察的内核参数场景。
+///
+/// # Errors
+///
+/// 理论上不会返回（无限循环）；若返回，代表 listener 本身已失效（如被关闭）。
 pub async fn run_echo_server(listener: TcpListener) -> io::Result<()> {
     loop {
         // accept() 是异步的：没有新连接时当前 task 让出执行权（yield），
@@ -72,6 +76,11 @@ pub async fn run_echo_server(listener: TcpListener) -> io::Result<()> {
 /// 这是阶段 3 网关「每连接读循环」的原型：
 /// 阶段 1 之后，这里的 `stream` 会被包一层 `Framed<_, Codec>`，
 /// 循环体从「搬运字节」升级为「解码出一帧帧完整消息」。
+///
+/// # Errors
+///
+/// 连接层面的 IO 错误（网络异常、对端重置等）会导致本函数提前返回 Err；
+/// 对端正常关闭则返回 `Ok(())`。
 pub async fn serve_connection(mut stream: TcpStream) -> io::Result<()> {
     // 固定大小栈上缓冲区，在循环外分配一次、反复复用。
     // 对照 Java：`new byte[4096]` 由 GC 回收；Rust 里它随函数栈帧分配/释放，
@@ -101,6 +110,10 @@ pub async fn serve_connection(mut stream: TcpStream) -> io::Result<()> {
 ///
 /// 单独做成库函数而非只在测试里写，是因为阶段 5 的 im-bench
 /// 会把它扩展成「连接风暴发生器」：几万个并发客户端 task 同时跑。
+///
+/// # Errors
+///
+/// 连接失败（服务不可达）或读写失败（连接中断）时返回 Err。
 pub async fn run_echo_client(addr: &str, payload: &[u8]) -> io::Result<Vec<u8>> {
     // connect 返回的 TcpStream 拥有（own）这条连接的全部资源，
     // stream 离开作用域时（无论正常返回还是 Err 提前返回），Drop 自动关闭 socket。
@@ -123,6 +136,10 @@ pub async fn run_echo_client(addr: &str, payload: &[u8]) -> io::Result<Vec<u8>> 
 /// **没有**实现 `Clone`——它代表对内核 listening socket 的独占抽象。
 /// 所以这里直接把 listener 的所有权 move 进后台 task（进程活着服务就一直跑），
 /// 调用方只拿地址。这是 Rust 所有权的典型场景：资源归属清晰，无歧义。
+///
+/// # Errors
+///
+/// 仅在绑定失败（如系统端口耗尽、无回环地址）时返回 Err。
 pub async fn spawn_echo_server_on_random_port() -> io::Result<std::net::SocketAddr> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
@@ -138,7 +155,7 @@ mod tests {
     /// 端到端冒烟测试：起服务端 → 客户端发消息 → 收到相同回显。
     ///
     /// 这个测试本身就是「异步测试怎么写」的范本：
-    /// #[tokio::test] 会创建一个单线程 tokio 运行时来跑这个 async 函数。
+    /// [`#[tokio::test]`] 会创建一个单线程 tokio 运行时来跑这个 async 函数。
     #[tokio::test]
     async fn echo_roundtrip() {
         let addr = spawn_echo_server_on_random_port().await.unwrap();
@@ -149,7 +166,7 @@ mod tests {
         assert_eq!(&echoed, payload);
     }
 
-    /// 边界测试：空 payload 也要正常工作（write_all(空) 是 no-op，read_exact(空) 立即返回）
+    /// 边界测试：空载荷也要正常工作（`write_all` 空切片是 no-op，`read_exact` 空切片立即返回）
     #[tokio::test]
     async fn echo_empty_payload() {
         let addr = spawn_echo_server_on_random_port().await.unwrap();

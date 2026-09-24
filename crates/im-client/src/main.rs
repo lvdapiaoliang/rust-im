@@ -7,8 +7,7 @@
 //!
 //! 学习文档：`docs/07-client.md`
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     // 阶段 0：占位入口。阶段 4 将替换为 TUI 客户端。
     println!("im-client：阶段 0 骨架，等待阶段 4 实现 TUI 界面");
-    Ok(())
 }

@@ -9,8 +9,7 @@
 //!
 //! 学习文档：`docs/08-perf.md`
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     // 阶段 0：占位入口。阶段 5 将实现子命令：connect / throughput / weaknet
     println!("im-bench：阶段 0 骨架，等待阶段 5 实现压测工具");
-    Ok(())
 }
