@@ -50,3 +50,52 @@ pub(crate) fn id_i64(id: u64) -> i64 {
 pub(crate) fn id_u64(id: i64) -> u64 {
     u64::try_from(id).expect("雪花 ID 装得下 u64")
 }
+
+/// 雪花 ID 的 JSON 形态约定：**字符串**。
+///
+/// 63 位雪花超出 JS `Number.MAX_SAFE_INTEGER`（2^53），数字形态在
+/// 前端会静默丢精度（后续所有按 ID 路由的请求全部错位）——与
+/// WS 信封（`web::ws` 模块文档）同一约定。入站宽容接受数字或字符串。
+pub mod serde_id {
+    use serde::{Deserializer, Serializer, de};
+
+    /// 序列化为十进制字符串。
+    ///
+    /// # Errors
+    ///
+    /// 序列化器自身失败时上抛（字符串化本身不会失败）。
+    pub fn serialize<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    /// 反序列化：接受字符串（推荐）或数字（宽容手写客户端/测试）。
+    ///
+    /// # Errors
+    ///
+    /// 非字符串/数字形态，或字符串不是合法 u64 时报错。
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+        struct IdVisitor;
+
+        impl de::Visitor<'_> for IdVisitor {
+            type Value = u64;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("字符串或数字形态的雪花 ID")
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<u64, E> {
+                Ok(value)
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<u64, E> {
+                u64::try_from(value).map_err(E::custom)
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<u64, E> {
+                value.parse().map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_any(IdVisitor)
+    }
+}
