@@ -252,7 +252,8 @@ impl LocalStore {
 
     /// 分配并持久化下一个 `client_msg_id`。
     fn next_client_msg_id(&mut self) -> Result<u64, StorageError> {
-        let next = self.engine.get(KEY_CLIENT_SEQ)?.map_or(1, decode_u64_value) + 1;
+        let prev = self.engine.get(KEY_CLIENT_SEQ)?.map_or(0, decode_u64_value);
+        let next = prev + 1;
         self.engine.put(KEY_CLIENT_SEQ, &next.to_be_bytes())?;
         Ok(next)
     }
