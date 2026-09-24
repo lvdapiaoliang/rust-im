@@ -3,11 +3,11 @@
 //! # 为什么 IM 本地库要自己写一个 KV 引擎？
 //!
 //! roadmap 4.5 的要求：**B+ 树 / LSM 思想——本地消息库索引、写前日志
-//! （理解 SQLite/RocksDB 原理）**。SQLite 用 B+ 树（读优化，原地更新）；
+//!（理解 `SQLite`/`RocksDB` 原理）**。`SQLite` 用 B+ 树（读优化，原地更新）；
 //! RocksDB/LevelDB 用 LSM（写优化，追加 + 压实）。IM 客户端的负载是
 //! 「聊天消息持续写入 + 偶尔翻历史」——写多读少，天然适合 LSM。
 //!
-//! # 本引擎的简化（对照生产 RocksDB）
+//! # 本引擎的简化（对照生产 `RocksDB`）
 //!
 //! ```text
 //!   写 put/delete ──▶ 追加到活跃段（WAL 语义）+ memtable（BTreeMap）
@@ -22,7 +22,7 @@
 //! 与生产级的差距（刻意保留差距，文档里讲清楚）：
 //! - 没有 SST 的块压缩与布隆过滤器；
 //! - scan 是全量收集而非各段有序迭代器的 k 路归并（压实后可优化成二分）；
-//! - 单 memtable，无 Immutable MemTable 层级；
+//! - 单 memtable，无 Immutable `MemTable` 层级；
 //! - fsync 策略简化为每写必 flush（性能取舍见 [`Engine::put`]）。
 //!
 //! # 崩溃恢复语义（WAL 的存在理由）
@@ -33,8 +33,8 @@
 //!
 //! # 算法/数据结构落点
 //!
-//! - **BTreeMap**：memtable 与 scan 收集器（B 树思想：有序、范围查询）；
-//! - **HashMap 索引 + pread**：封存段 O(1) 定位（对照 SST 的稀疏索引）；
+//! - **`BTreeMap`**：memtable 与 scan 收集器（B 树思想：有序、范围查询）；
+//! - **`HashMap` 索引 + pread**：封存段 O(1) 定位（对照 SST 的稀疏索引）；
 //! - **版本序覆盖**：同一 key 多次写，读时「最新的赢」——靠遍历顺序
 //!   （段代数递增、段内偏移递增）而非时间戳，省 8 字节/记录；
 //! - **CRC32 + 截断恢复**：复用 `im_protocol::crc32`（查表法）。
@@ -48,6 +48,11 @@ use im_protocol::crc32;
 use im_protocol::varint;
 
 use crate::error::StorageError;
+
+/// 版本序合并视图：key → 最新值（`None` = tombstone）。
+type Merged = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
+/// 有序 key-value 对列表（前缀扫描的输出）。
+type KeyValuePairs = Vec<(Vec<u8>, Vec<u8>)>;
 
 /// 记录种类。
 const KIND_PUT: u8 = 0;
@@ -67,7 +72,7 @@ pub(crate) enum Record {
 }
 
 impl Record {
-    /// 编码为「kind + varint(key_len) + key + varint(value_len) + value」。
+    /// 编码为「kind + `varint(key_len)` + key + `varint(value_len)` + value」。
     fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
         match self {
@@ -120,7 +125,10 @@ impl Record {
 fn encode_frame(record: &Record) -> Vec<u8> {
     let body = record.encode();
     let mut out = Vec::with_capacity(body.len() + 8);
-    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    // 帧体长度写入侧同样受 MAX_RECORD_LEN 约束（读侧已拦截超长帧）
+    let len =
+        u32::try_from(body.len()).expect("记录体受 MAX_RECORD_LEN 量级约束");
+    out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(&crc32::checksum(&body).to_le_bytes());
     out.extend_from_slice(&body);
     out
@@ -129,7 +137,7 @@ fn encode_frame(record: &Record) -> Vec<u8> {
 /// 一个封存段：只读文件 + key → 文件偏移的完整索引。
 ///
 /// 对照 SST：生产级用稀疏索引（每 N 条记一个锚点）+ 块内二分；
-/// 本地消息库量级（万级）用完整 HashMap 更简单，且 O(1) 定位。
+/// 本地消息库量级（万级）用完整 `HashMap` 更简单，且 O(1) 定位。
 struct SealedSegment {
     /// 段号（代数）：compact 后清理旧段文件时用。
     id: u64,
@@ -230,14 +238,14 @@ impl Engine {
     ///
     /// 每写必 flush（不 fsync）：进程崩溃不丢（OS 页缓存还在），
     /// 掉电才可能丢——本地聊天记录对这个级别的持久性足够，
-    /// 换来的是每条消息微秒级落盘延迟。对照 SQLite 默认的
+    /// 换来的是每条消息微秒级落盘延迟。对照 `SQLite` 默认的
     /// `synchronous=FULL`（每次 commit fsync）。
     ///
     /// # Errors
     ///
     /// 磁盘写失败时返回 [`StorageError::Io`]。
     pub(crate) fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
-        self.append(Record::Put {
+        self.append(&Record::Put {
             key: key.to_vec(),
             value: value.to_vec(),
         })?;
@@ -253,7 +261,7 @@ impl Engine {
     ///
     /// 磁盘写失败时返回 [`StorageError::Io`]。
     pub(crate) fn delete(&mut self, key: &[u8]) -> Result<(), StorageError> {
-        self.append(Record::Delete { key: key.to_vec() })
+        self.append(&Record::Delete { key: key.to_vec() })
     }
 
     /// 点查：memtable → 封存段从新到旧。
@@ -285,12 +293,9 @@ impl Engine {
     /// # Errors
     ///
     /// 段文件读取失败时返回 [`StorageError::Io`]。
-    pub(crate) fn scan_prefix(
-        &self,
-        prefix: &[u8],
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StorageError> {
+    pub(crate) fn scan_prefix(&self, prefix: &[u8]) -> Result<KeyValuePairs, StorageError> {
         // 版本序收集：段代数升序 + 段内偏移升序 = 写入时间序
-        let mut merged: BTreeMap<Vec<u8>, Option<Vec<u8>>> = BTreeMap::new();
+        let mut merged: Merged = BTreeMap::new();
         for segment in &self.segments {
             for (key, &offset) in &segment.index {
                 match read_record_at(&segment.file, offset)? {
@@ -350,7 +355,7 @@ impl Engine {
         self.seal()?;
 
         // 收集存活数据（同 scan 的 BTreeMap 覆盖语义）
-        let mut merged: BTreeMap<Vec<u8>, Option<Vec<u8>>> = BTreeMap::new();
+        let mut merged: Merged = BTreeMap::new();
         for segment in &self.segments {
             for (key, &offset) in &segment.index {
                 match read_record_at(&segment.file, offset)? {
@@ -403,12 +408,12 @@ impl Engine {
     }
 
     /// 追加一条记录：写活跃段 + 更新 memtable。
-    fn append(&mut self, record: Record) -> Result<(), StorageError> {
-        let frame = encode_frame(&record);
+    fn append(&mut self, record: &Record) -> Result<(), StorageError> {
+        let frame = encode_frame(record);
         self.active.writer.write_all(&frame)?;
         self.active.writer.flush()?;
         self.active.count += 1;
-        match &record {
+        match record {
             Record::Put { key, value } => {
                 self.memtable.insert(key.clone(), Some(value.clone()));
             }
@@ -471,16 +476,10 @@ fn open_append(path: PathBuf) -> Result<BufWriter<File>, StorageError> {
 ///
 /// 坏帧即停：`Ok((index, good_bytes))` 里的 `good_bytes` 是最后一条
 /// 好记录的结束偏移——恢复时用它截尾。
-fn replay(
-    mut reader: BufReader<File>,
-) -> Result<(BTreeMap<Vec<u8>, Option<Vec<u8>>>, u64), StorageError> {
+fn replay(mut reader: BufReader<File>) -> Result<(Merged, u64), StorageError> {
     let mut memtable = BTreeMap::new();
     let mut offset: u64 = 0;
-    loop {
-        let frame = match read_frame_at(&mut reader, offset) {
-            Ok(Some(frame)) => frame,
-            _ => break, // EOF 或坏帧：坏尾截断语义
-        };
+    while let Ok(Some(frame)) = read_frame_at(&mut reader, offset) {
         match Record::decode(&frame)? {
             Record::Put { key, value } => {
                 memtable.insert(key, Some(value));
@@ -498,11 +497,7 @@ fn replay(
 fn build_index(mut reader: BufReader<File>) -> Result<HashMap<Vec<u8>, u64>, StorageError> {
     let mut index = HashMap::new();
     let mut offset: u64 = 0;
-    loop {
-        let frame = match read_frame_at(&mut reader, offset) {
-            Ok(Some(frame)) => frame,
-            _ => break,
-        };
+    while let Ok(Some(frame)) = read_frame_at(&mut reader, offset) {
         match Record::decode(&frame)? {
             Record::Put { key, .. } | Record::Delete { key } => {
                 index.insert(key, offset);
