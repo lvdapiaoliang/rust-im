@@ -221,10 +221,11 @@ pub struct LoginResp {
     pub user: User,
 }
 
-/// 好友请求体（按用户 ID 发起）。
+/// 好友请求体（按用户 ID 发起；ID 接受字符串或数字形态）。
 #[derive(Debug, serde::Deserialize)]
 pub struct FriendReqBody {
     /// 目标用户 ID。
+    #[serde(deserialize_with = "super::serde_id::deserialize")]
     pub to: u64,
 }
 
@@ -238,7 +239,8 @@ pub struct CreateGroupReq {
 /// 拉人入群请求。
 #[derive(Debug, serde::Deserialize)]
 pub struct AddMemberReq {
-    /// 被拉的用户 ID。
+    /// 被拉的用户 ID（接受字符串或数字形态）。
+    #[serde(deserialize_with = "super::serde_id::deserialize")]
     pub user_id: u64,
 }
 
@@ -612,7 +614,8 @@ mod tests {
         let resp = app.clone().oneshot(authed("GET", "/api/me", &token, None)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let me = json_body(resp).await;
-        assert_eq!(me["id"], serde_json::json!(user.id));
+        // ID 是字符串形态（见 web::serde_id）
+        assert_eq!(me["id"], serde_json::json!(user.id.to_string()));
 
         // 错误口令 401；缺令牌 401
         let bad = Request::post("/api/login")
@@ -659,7 +662,8 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
         let created = json_body(resp).await;
-        let request_id = created["id"].as_u64().unwrap();
+        let request_id: u64 =
+            created["id"].as_str().expect("ID 应为字符串").parse().expect("应为合法 u64");
 
         // B 的收件箱里能看到
         let resp = app
@@ -669,7 +673,7 @@ mod tests {
             .unwrap();
         let body = json_body(resp).await;
         assert_eq!(body["incoming"].as_array().unwrap().len(), 1);
-        assert_eq!(body["incoming"][0]["from_user"], serde_json::json!(user_a.id));
+        assert_eq!(body["incoming"][0]["from_user"], serde_json::json!(user_a.id.to_string()));
 
         // A 无权接受自己的请求（收方是 B）
         let resp = app
@@ -701,7 +705,7 @@ mod tests {
             app.clone().oneshot(authed("GET", "/api/friends", &token_b, None)).await.unwrap();
         let friends = json_body(resp).await;
         assert_eq!(friends.as_array().unwrap().len(), 1);
-        assert_eq!(friends[0]["id"], serde_json::json!(user_a.id));
+        assert_eq!(friends[0]["id"], serde_json::json!(user_a.id.to_string()));
 
         // A 删除好友
         let resp = app
@@ -742,7 +746,8 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
         let group = json_body(resp).await;
-        let group_id = group["id"].as_u64().unwrap();
+        let group_id: u64 =
+            group["id"].as_str().expect("ID 应为字符串").parse().expect("应为合法 u64");
 
         // 群主拉 B
         let resp = app
@@ -810,7 +815,8 @@ hello file content\r
         let meta = json_body(resp).await;
         assert_eq!(meta["filename"], serde_json::json!("hello.txt"));
         assert_eq!(meta["size_bytes"], serde_json::json!(payload.len()));
-        let file_id = meta["id"].as_u64().unwrap();
+        let file_id: u64 =
+            meta["id"].as_str().expect("ID 应为字符串").parse().expect("应为合法 u64");
 
         // 下载往返：字节一致 + 文件名回填
         let resp = app
