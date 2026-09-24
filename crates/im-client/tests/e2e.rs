@@ -239,10 +239,11 @@ async fn crashed_client_resends_persisted_outbox_on_restart() {
                     assert_eq!(client_msg_id, 1, "Bob 的首条消息");
                     break;
                 }
+                // 过程事件：断连/重连/转圈/空批都不是结局
                 ClientEvent::Disconnected
                 | ClientEvent::Connected { .. }
                 | ClientEvent::MessageQueued { .. }
-                | ClientEvent::SyncBatch(_) => continue, // 过程事件
+                | ClientEvent::SyncBatch(_) => {}
                 other => panic!("Bob 不应收到 {other:?}"),
             },
         }
@@ -256,7 +257,7 @@ async fn crashed_client_resends_persisted_outbox_on_restart() {
         Ok(Some(ClientEvent::Message(msg))) => {
             panic!("重复投递未被去重：{msg:?}")
         }
-        Ok(Some(_)) | Ok(None) => {} // 其他过程事件/通道存活，不足为证
+        Ok(Some(_) | None) => {} // 其他过程事件/通道存活，不足为证
     }
 
     // 终态验收（绕过客户端直接开库，防自说自话）：
