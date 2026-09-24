@@ -25,6 +25,11 @@ serde_json.workspace = true
 argon2.workspace = true
 rand.workspace = true
 uuid.workspace = true
+sha2.workspace = true
+tower-http.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 [[bin]]
 name = "im-server"
