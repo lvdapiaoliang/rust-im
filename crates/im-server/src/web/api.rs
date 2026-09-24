@@ -248,7 +248,7 @@ pub struct AddMemberReq {
 
 /// 组 REST 路由（CORS 全开：开发期 Vite 5173 跨域直连；生产由反向代理同源收口）。
 ///
-/// 注：不加 `#[must_use]`——`Router` 自带 must_use，叠加会触发
+/// 注：不加 `#[must_use]`——`Router` 自带 `must_use`，叠加会触发
 /// `clippy::double_must_use`。
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -792,13 +792,12 @@ mod tests {
         let boundary = "----qoder-test-boundary";
         let payload = b"hello file content".to_vec();
         let body = format!(
-            "--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"hello.txt\"\r\n\
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"hello.txt\"\r\n\
              Content-Type: text/plain\r
 \r
 hello file content\r
---{b}--\r
+--{boundary}--\r
 ",
-            b = boundary
         );
         let upload = Request::post("/api/files")
             .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
