@@ -178,7 +178,8 @@ impl Payload for Handshake {
     }
 
     fn decode(src: &[u8]) -> Result<Self, ProtocolError> {
-        let mut r = Reader::new(&mut &src[..]);
+        let mut cursor: &[u8] = src;
+        let mut r = Reader::new(&mut cursor);
         let user_id = r.varint()?;
         let token = r.string()?;
         r.finish()?;
@@ -234,7 +235,8 @@ impl Payload for HandshakeAck {
     }
 
     fn decode(src: &[u8]) -> Result<Self, ProtocolError> {
-        let mut r = Reader::new(&mut &src[..]);
+        let mut cursor: &[u8] = src;
+        let mut r = Reader::new(&mut cursor);
         let session_id = r.varint()?;
         let reason = r.string()?;
         r.finish()?;
@@ -273,7 +275,8 @@ impl Payload for Msg {
     }
 
     fn decode(src: &[u8]) -> Result<Self, ProtocolError> {
-        let mut r = Reader::new(&mut &src[..]);
+        let mut cursor: &[u8] = src;
+        let mut r = Reader::new(&mut cursor);
         let from = r.varint()?;
         let to = r.varint()?;
         let msg_id = r.varint()?;
@@ -307,7 +310,8 @@ impl Payload for MsgAck {
     }
 
     fn decode(src: &[u8]) -> Result<Self, ProtocolError> {
-        let mut r = Reader::new(&mut &src[..]);
+        let mut cursor: &[u8] = src;
+        let mut r = Reader::new(&mut cursor);
         let msg_id = r.varint()?;
         r.finish()?;
         Ok(Self { msg_id })
@@ -332,7 +336,8 @@ impl Payload for SyncReq {
     }
 
     fn decode(src: &[u8]) -> Result<Self, ProtocolError> {
-        let mut r = Reader::new(&mut &src[..]);
+        let mut cursor: &[u8] = src;
+        let mut r = Reader::new(&mut cursor);
         let since = r.varint()?;
         r.finish()?;
         Ok(Self { since })
@@ -361,7 +366,8 @@ impl Payload for SyncResp {
     }
 
     fn decode(src: &[u8]) -> Result<Self, ProtocolError> {
-        let mut r = Reader::new(&mut &src[..]);
+        let mut cursor: &[u8] = src;
+        let mut r = Reader::new(&mut cursor);
         let count = r.varint()?;
         let count = usize::try_from(count).map_err(|_| ProtocolError::PayloadTooShort {
             need: usize::MAX,
@@ -549,6 +555,6 @@ mod tests {
         .encode_frame(1, 0);
         frame.flags = flags::COMPRESSED;
         let decoded = Msg::decode_frame(&frame).unwrap();
-        assert_eq!(&decoded.content, b"flagged");
+        assert_eq!(decoded.content, Bytes::from_static(b"flagged"));
     }
 }
