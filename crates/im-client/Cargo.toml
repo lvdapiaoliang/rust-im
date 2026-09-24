@@ -19,6 +19,9 @@ tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 im-server.workspace = true

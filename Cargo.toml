@@ -41,6 +41,11 @@ anyhow = "1"
 # ---- 序列化（协议层用）----
 bytes = "1"
 
+# ---- TUI（im-client 的终端界面）----
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+futures = "0.3"
+
 # ---- 测试 ----
 tokio-test = "0.4"
 
