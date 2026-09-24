@@ -15,11 +15,13 @@
 use std::path::PathBuf;
 
 use axum::extract::multipart::Multipart;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router, extract::FromRequestParts};
+use serde::Deserialize;
+use serde_json::json;
 use sqlx::PgPool;
 
 use crate::session::Sessions;
@@ -262,6 +264,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/friends/requests/{id}/reject", post(reject_friend_request))
         .route("/api/friends", get(list_friends))
         .route("/api/friends/{user_id}", delete(delete_friend))
+        .route("/api/users", get(find_user))
         .route("/api/groups", post(create_group).get(my_groups))
         .route("/api/groups/{id}/members", post(add_group_member))
         .route("/api/files", post(upload_file))
@@ -323,13 +326,37 @@ fn validate_credentials(username: &str, password: &str) -> Result<(), ApiError> 
 // 好友
 // ────────────────────────────────────────────────────────────────
 
+/// 把用户序列化成事件载荷里的紧凑形态（ID 串化约定与 REST 一致）。
+fn user_json(user: &User) -> serde_json::Value {
+    json!({
+        "id": user.id.to_string(),
+        "username": user.username,
+        "display_name": user.display_name,
+    })
+}
+
 /// POST /api/friends/requests：发起好友请求。
+///
+/// 接收方在线则实时收到 `event` 信封（kind = friend_request）；
+/// 离线则放弃——下次登录拉列表自然看到（事件的尽力而为语义）。
 async fn create_friend_request(
     State(state): State<AppState>,
     auth: AuthUser,
     Json(req): Json<FriendReqBody>,
 ) -> Result<(StatusCode, Json<super::friends::FriendRequestView>), ApiError> {
     let view = state.friends.create_request(&state.sessions, auth.user.id, req.to).await?;
+    let payload = json!({
+        "kind": "friend_request",
+        "request": {
+            "id": view.id.to_string(),
+            "from_user": view.from_user.to_string(),
+            "from_username": view.from_username,
+            "to_user": view.to_user.to_string(),
+            "to_username": view.to_username,
+            "status": view.status,
+        },
+    });
+    state.sessions.push_event(req.to, payload.to_string()).await;
     Ok((StatusCode::CREATED, Json(view)))
 }
 
@@ -343,16 +370,30 @@ async fn list_friend_requests(
 }
 
 /// POST /api/friends/requests/{id}/accept：接受（仅收方）。
+///
+/// 接受成功后双方都收事件：发起方 `friend_accepted`（「谁接受了我」），
+/// 接受方自己不需要——她刚点的按钮。
 async fn accept_friend_request(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, ApiError> {
-    state.friends.accept_request(id, auth.user.id).await?;
+    let counterpart = state.friends.accept_request(id, auth.user.id).await?;
+    if let Some(ref user) = counterpart {
+        let payload = json!({
+            "kind": "friend_accepted",
+            "user": user_json(user),
+            "by": user_json(&auth.user),
+        });
+        state.sessions.push_event(user.id, payload.to_string()).await;
+    }
     Ok(StatusCode::OK)
 }
 
 /// POST /api/friends/requests/{id}/reject：拒绝（仅收方）。
+///
+/// 不推送事件：拒绝是「没有事情发生」（发方拉列表才知道）——
+/// 避免「你的请求被拒」这种伤害性提醒，微信/Telegram 同样如此。
 async fn reject_friend_request(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -372,13 +413,42 @@ async fn list_friends(
 }
 
 /// `DELETE /api/friends/{user_id}`：删除好友（双向对称）。
+///
+/// 对方在线则实时收到 `friend_removed` 事件（前端据此立即下架会话）。
 async fn delete_friend(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(other): Path<u64>,
 ) -> Result<StatusCode, ApiError> {
-    state.friends.remove_friend(auth.user.id, other).await?;
+    let counterpart = state.friends.remove_friend(auth.user.id, other).await?;
+    if let Some(ref user) = counterpart {
+        let payload = json!({
+            "kind": "friend_removed",
+            "user": user_json(&auth.user),
+        });
+        state.sessions.push_event(user.id, payload.to_string()).await;
+    }
     Ok(StatusCode::OK)
+}
+
+/// GET /api/users?username=…：按用户名精确查找（加好友的入口）。
+///
+/// 返回 `null`（而非 404）表示「没找到」——查询语义不是资源语义；
+/// 精确匹配而非前缀模糊：防拖库式枚举，也够用了（微信也是精确账号）。
+async fn find_user(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Query(params): Query<FindUserParams>,
+) -> Result<Json<Option<User>>, ApiError> {
+    let user = state.accounts.find_by_username(params.username.trim()).await?;
+    Ok(Json(user))
+}
+
+/// `find_user` 的查询参数。
+#[derive(Debug, Deserialize)]
+struct FindUserParams {
+    /// 精确用户名。
+    username: String,
 }
 
 // ────────────────────────────────────────────────────────────────
