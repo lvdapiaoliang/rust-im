@@ -598,6 +598,12 @@ mod tests {
         (user.id, token)
     }
 
+    /// 直接连库结为好友（不经 REST——权限校验的前提铺设，不是被测对象）。
+    async fn make_friends(state: &AppState, a: u64, b: u64) {
+        let req = state.friends.create_request(&state.sessions, a, b).await.expect("请求应成功");
+        state.friends.accept_request(req.id, b).await.expect("接受应成功");
+    }
+
     /// WS 客户端包装：收发 JSON 信封 + 自增 seq。
     struct WsClient {
         stream: tokio_tungstenite::WebSocketStream<
@@ -668,6 +674,7 @@ mod tests {
             user_with_token(&state, &format!("ws_a_{}", uuid::Uuid::new_v4().simple())).await;
         let (id_b, token_b) =
             user_with_token(&state, &format!("ws_b_{}", uuid::Uuid::new_v4().simple())).await;
+        make_friends(&state, id_a, id_b).await;
 
         let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
         let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
@@ -737,6 +744,7 @@ mod tests {
             user_with_token(&state, &format!("ws_off_a_{}", uuid::Uuid::new_v4().simple())).await;
         let (id_b, token_b) =
             user_with_token(&state, &format!("ws_off_b_{}", uuid::Uuid::new_v4().simple())).await;
+        make_friends(&state, id_a, id_b).await;
 
         let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
         let _ = alice.recv().await; // 消化 welcome
