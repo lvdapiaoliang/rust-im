@@ -69,7 +69,8 @@ impl PendingMsg {
 
     fn decode(src: &[u8]) -> Result<Self, StorageError> {
         let mut cursor: &[u8] = src;
-        let mut read_varint = || {
+        // 闭包借住 cursor 逐段推进；返回类型显式标注（多个 From 实现使推断失效）
+        let mut read_varint = || -> Result<u64, StorageError> {
             let (value, used) =
                 im_protocol::varint::decode_u64(cursor).ok_or(StorageError::Corrupted)?;
             cursor = &cursor[used..];

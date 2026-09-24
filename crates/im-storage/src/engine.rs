@@ -185,12 +185,13 @@ impl Engine {
         segment_ids.sort_unstable();
 
         // 封存段：全部建索引（含崩溃前的活跃段——重开后统一按封存段对待，
-        // 追加写从新段继续；段数增长由 compact 兕底）
+        // 追加写从新段继续；段数增长由 compact 兜底）
         let mut segments = Vec::new();
         for &id in &segment_ids {
             let path = segment_path(&dir, id);
             let file = File::open(&path)?;
-            let index = build_index(BufReader::new(&file))?;
+            // 索引扫描要读句柄，段结构体也要持句柄做定位读——clone 一份
+            let index = build_index(BufReader::new(file.try_clone()?))?;
             segments.push(SealedSegment {
                 id,
                 file,
@@ -209,12 +210,13 @@ impl Engine {
             // 截掉坏尾，写指针回到好数据末尾（追加模式续写）
             let file = OpenOptions::new().read(true).append(true).open(&active_path)?;
             file.set_len(good_bytes)?;
-            (memtable, memtable.len())
+            let count = memtable.len();
+            (memtable, count)
         } else {
             (BTreeMap::new(), 0)
         };
 
-        let writer = open_append(&active_path)?;
+        let writer = open_append(active_path)?;
         Ok(Self {
             dir,
             segments,
@@ -290,7 +292,7 @@ impl Engine {
         // 版本序收集：段代数升序 + 段内偏移升序 = 写入时间序
         let mut merged: BTreeMap<Vec<u8>, Option<Vec<u8>>> = BTreeMap::new();
         for segment in &self.segments {
-            for (&key, &offset) in &segment.index {
+            for (key, &offset) in &segment.index {
                 match read_record_at(&segment.file, offset)? {
                     Record::Put { value, .. } => {
                         merged.insert(key.clone(), Some(value));
@@ -350,7 +352,7 @@ impl Engine {
         // 收集存活数据（同 scan 的 BTreeMap 覆盖语义）
         let mut merged: BTreeMap<Vec<u8>, Option<Vec<u8>>> = BTreeMap::new();
         for segment in &self.segments {
-            for (&key, &offset) in &segment.index {
+            for (key, &offset) in &segment.index {
                 match read_record_at(&segment.file, offset)? {
                     Record::Put { value, .. } => {
                         merged.insert(key.clone(), Some(value));
@@ -383,7 +385,7 @@ impl Engine {
 
         // 原子替换段列表：新段成功写完才删旧段（先写后删的崩溃安全序）
         let file = File::open(&path)?;
-        let index = build_index(BufReader::new(&file))?;
+        let index = build_index(BufReader::new(file.try_clone()?))?;
         let old_paths: Vec<PathBuf> = self
             .segments
             .iter()
@@ -423,7 +425,7 @@ impl Engine {
         let old_id = self.next_segment - 1;
         let path = segment_path(&self.dir, old_id);
         let file = File::open(&path)?;
-        let index = build_index(BufReader::new(&file))?;
+        let index = build_index(BufReader::new(file.try_clone()?))?;
         self.segments.push(SealedSegment {
             id: old_id,
             file,
@@ -541,8 +543,12 @@ fn read_frame_at(
 }
 
 /// 定位读：seek 到偏移读一帧并解出记录。
+///
+/// # Errors
+///
+/// 段文件读取失败或该偏移不是合法帧时返回 [`StorageError`]。
 fn read_record_at(file: &File, offset: u64) -> Result<Record, StorageError> {
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::new(file.try_clone()?);
     let frame = read_frame_at(&mut reader, offset)?.ok_or(StorageError::Corrupted)?;
     Record::decode(&frame)
 }
