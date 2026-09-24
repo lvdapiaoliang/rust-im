@@ -123,7 +123,7 @@ impl Connection {
     ///
     /// 编码进入复用的 `write_buf` 后一次 `write_all` 写出，并显式 flush——
     /// `TcpStream` 没有用户态缓冲，flush 实际是 no-op，
-    /// 但保持「任何 AsyncWrite 实现都正确」的通用语义。
+    /// 但保持「任何 `AsyncWrite` 实现都正确」的通用语义。
     ///
     /// # Errors
     ///
@@ -255,7 +255,7 @@ mod tests {
     use im_protocol::Cmd;
     use tokio::net::TcpListener;
 
-    /// 真实 TCP 上的帧往返：write_frame → read_frame
+    /// 真实 TCP 上的帧往返：`write_frame` → `read_frame`
     #[tokio::test]
     async fn frame_roundtrip_over_tcp() {
         let listener = TcpStreamEchoListener::spawn().await;
@@ -268,7 +268,7 @@ mod tests {
         listener.handle.await.unwrap().unwrap();
     }
 
-    /// 对端 drop 连接后，read_frame 返回 Ok(None)（EOF 语义）
+    /// 对端 drop 连接后，`read_frame` 返回 `Ok(None)`（EOF 语义）
     #[tokio::test]
     async fn read_frame_reports_eof_on_peer_close() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

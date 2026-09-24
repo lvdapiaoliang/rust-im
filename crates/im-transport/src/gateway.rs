@@ -238,19 +238,16 @@ fn spawn_writer(
         loop {
             tokio::select! {
                 // 关停 ≠ 立刻扔掉队列：先排干已入队的帧（优雅），再退出
-                _ = done.wait() => {
+                () = done.wait() => {
                     while let Ok(frame) = rx.try_recv() {
-                        if let Err(e) = writer.write_frame(&frame).await {
-                            return Err(e);
-                        }
+                        writer.write_frame(&frame).await?;
                     }
                     return Ok(());
                 }
                 maybe = rx.recv() => match maybe {
                     Some(frame) => {
-                        if let Err(e) = writer.write_frame(&frame).await {
-                            return Err(e); // 写失败：连接已坏，actor 退役
-                        }
+                        // 写失败：连接已坏，actor 退役
+                        writer.write_frame(&frame).await?;
                     }
                     // 所有发送方都走了：没有更多帧，正常收工
                     None => return Ok(()),
@@ -272,8 +269,8 @@ fn spawn_heartbeat(
         let mut seq: u64 = 0;
         loop {
             tokio::select! {
-                _ = done.wait() => break,
-                _ = sleep(interval) => {
+                () = done.wait() => break,
+                () = sleep(interval) => {
                     seq += 1;
                     let ping = Frame::new(Cmd::Ping, seq, 0, Bytes::new());
                     if handle.send(ping).await.is_err() {
@@ -299,7 +296,7 @@ async fn read_loop(
         tokio::select! {
             // 外部关停：立即停止读（尚未读走的字节会被丢弃——
             // 关停语义是「不再服务新工作」，已入站的帧已尽力递交）
-            _ = shutdown.wait() => return Ok(()),
+            () = shutdown.wait() => return Ok(()),
 
             // timeout 包住 read_frame：每读到任何字节（哪怕半帧）计时器重置。
             // 注意 pending 队列里的帧会立即交付，不会吃超时
@@ -366,7 +363,7 @@ mod tests {
             let mut accept_shutdown = shutdown_rx.clone();
             loop {
                 tokio::select! {
-                    _ = accept_shutdown.wait() => break,
+                    () = accept_shutdown.wait() => break,
                     accepted = listener.accept() => {
                         let Ok((stream, _)) = accepted else { continue };
                         tokio::spawn(run_gateway_connection(
@@ -382,7 +379,7 @@ mod tests {
         (addr, inbound_rx, shutdown_tx)
     }
 
-    /// 主线用例：客户端发 Msg → 业务层收到 → 通过 handle 回 MsgAck → 客户端收到
+    /// 主线用例：客户端发 `Msg` → 业务层收到 → 通过 handle 回 `MsgAck` → 客户端收到
     #[tokio::test]
     async fn msg_roundtrip_through_gateway() {
         let (addr, mut inbound, _shutdown) = spawn_gateway(GatewayConfig::default()).await;
@@ -491,7 +488,7 @@ mod tests {
         );
     }
 
-    /// 空闲超时：静默客户端在 idle_timeout 后被服务端断开（客户端看到 EOF）
+    /// 空闲超时：静默客户端在 `idle_timeout` 后被服务端断开（客户端看到 EOF）
     #[tokio::test]
     async fn idle_timeout_closes_silent_connection() {
         let config = GatewayConfig {

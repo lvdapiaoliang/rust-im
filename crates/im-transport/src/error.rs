@@ -43,7 +43,7 @@ pub enum TransportError {
 mod tests {
     use super::*;
 
-    /// From 转换链：io::Error / ProtocolError 都能直接 `?` 进 TransportError
+    /// From 转换链：`io::Error` / `ProtocolError` 都能直接 `?` 进 `TransportError`
     #[test]
     fn errors_convert_from_sources() {
         let io_err: TransportError = io::Error::new(io::ErrorKind::ConnectionReset, "reset").into();
