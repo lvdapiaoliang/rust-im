@@ -101,10 +101,11 @@ impl DedupWindow {
             // 旧 bit j 表示 rcv_nxt_old+1+j = rcv_nxt_new+j，
             // 于是 bit0 恰好是「新的 rcv_nxt」是否已缓存：
             // 为 1 则吸收并继续，直到遇到第一个洞。
-            self.rcv_nxt += 1;
+            // wrapping：seq 空间是环，u64::MAX 的下一格是 0（回绕安全）。
+            self.rcv_nxt = self.rcv_nxt.wrapping_add(1);
             while self.bitmap & 1 == 1 {
                 self.bitmap >>= 1;
-                self.rcv_nxt += 1;
+                self.rcv_nxt = self.rcv_nxt.wrapping_add(1);
             }
             // 弹出终止循环的 0 位，恢复不变式「bit j = rcv_nxt+1+j」
             self.bitmap >>= 1;
@@ -232,7 +233,7 @@ mod tests {
         assert_eq!(w.backlog(), 0);
     }
 
-    /// 超窗：seq 落在窗口之外返回 TooFar 并携带期望值
+    /// 超窗：`seq` 落在窗口之外返回 `TooFar` 并携带期望值
     #[test]
     fn beyond_window_is_too_far() {
         let mut w = DedupWindow::new(100);
@@ -260,7 +261,7 @@ mod tests {
         }
     }
 
-    /// seq 回绕安全：从 u64::MAX 附近开始，回绕后判定依然正确
+    /// seq 回绕安全：从 `u64::MAX` 附近开始，回绕后判定依然正确
     #[test]
     fn wraparound_is_safe() {
         let mut w = DedupWindow::new(u64::MAX);
@@ -274,7 +275,7 @@ mod tests {
     }
 
     /// 对拍性质测试：窗口范围内的随机 seq 流，
-    /// DedupWindow 的「新/旧」判定必须与 HashSet 完全一致。
+    /// `DedupWindow` 的「新/旧」判定必须与 `HashSet` 完全一致。
     ///
     /// 这是算法正确性的金标准——两个独立实现给出相同答案。
     #[test]
