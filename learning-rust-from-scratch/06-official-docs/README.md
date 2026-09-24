@@ -48,7 +48,7 @@
   └─ CLI Book                ← im-client CLI 端的工程实践
 
 阶段 D（进阶/深水区，对应 docs/ 深度文档）
-  ├─ Nomicon                 ← unsafe/FFI/Vec 实现（阶段 6 SDK 前必读）
+  ├─ Nomicon                 ← unsafe/FFI/Vec 实现（阶段 11 SDK 前必读）
   ├─ Reference               ← 语义争议时的最终仲裁
   ├─ Edition Guide 2024 部分 ← 理解 rust-im 为什么用 edition 2024
   └─ Unstable Book           ← 只在跟踪特定特性（如 io_uring）时查

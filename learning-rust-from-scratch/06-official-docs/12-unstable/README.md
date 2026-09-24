@@ -56,7 +56,7 @@ fn main() {
 
 | 特性 | 用途 | 关注时机 |
 |---|---|---|
-| `io_error_more` / io_uring 相关 | 里程碑 3 的内核级 IO | 阶段 8-9 前 |
+| `io_error_more` / io_uring 相关 | 里程碑 3 的内核级 IO | 阶段 10 前 |
 | `async_closure`（已稳定/接近稳定） | 回调式异步代码简化 | 已可关注 |
 | `specialization` | 泛型特化（性能优化空间） | 长期（稳定遥遥无期） |
 

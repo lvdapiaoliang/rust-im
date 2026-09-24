@@ -50,7 +50,7 @@ Rust 的「标准库」实际是四个 crate：
 |---|---|---|
 | `std::net` | TcpListener/TcpStream/UdpSocket/SocketAddr | 阶段 2 传输层（tokio 版是其异步镜像） |
 | `std::io` | Read/Write/BufReader/Error/ErrorKind | echo 服务器已用；`ErrorKind::WouldBlock` 是 epoll 世界的钥匙 |
-| `std::fs` / `std::path` / `std::os` | 文件/路径/平台特定 API | 挂载盘阶段 8 |
+| `std::fs` / `std::path` / `std::os` | 文件/路径/平台特定 API | 挂载盘阶段 13 |
 | `std::process` | 子进程、ExitStatus | xtask 构建脚本 |
 | `std::mem` | size_of/take/replace/swap | 算法系列的常客 |
 | `std::cell` | Cell/RefCell/OnceCell | 内部可变性 |

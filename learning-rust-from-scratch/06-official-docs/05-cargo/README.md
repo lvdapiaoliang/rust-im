@@ -72,7 +72,7 @@ cargo why --package=...      # （nightly）解释为什么需要这个依赖
 | workspace | 9 crate 单仓库，根 `[workspace.dependencies]` 统一管理版本 |
 | features | im-transport 的 `tls` feature、im-client 的按需裁剪 |
 | profiles | 压测前 `[profile.release] lto = true` |
-| build scripts | 阶段 6 的 SDK 头文件生成、阶段 8 的系统库探测 |
+| build scripts | 阶段 11 的 SDK 头文件生成、阶段 13 的系统库探测 |
 | config.toml | 国内镜像源 + 目标平台 linker 配置 |
 
 ## 七、国内开发者必做配置

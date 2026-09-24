@@ -53,7 +53,7 @@ unsafe Rust 的官方指南。官方原话：**「如果你想要长久幸福的
 的环形缓冲。
 
 ### FFI——第 11 章
-`im-sdk` 阶段 6 的直接前置。重点：repr(C) 结构体布局契约、
+`im-sdk` 阶段 11 的直接前置。重点：repr(C) 结构体布局契约、
 extern "C" 双向调用、`CString`/`CStr` 的所有权边界、panic 不能跨 FFI 边界
 （unwinding 跨边界是 UB——2024 edition 要求显式 `unsafe extern` + abort 声明的由来）。
 
@@ -69,7 +69,7 @@ extern "C" 双向调用、`CString`/`CStr` 的所有权边界、panic 不能跨 
 
 ## 阅读建议
 
-1. **不要现在通读**——正确的时机是 rust-im 阶段 6（FFI SDK）之前，
+1. **不要现在通读**——正确的时机是 rust-im 阶段 11（FFI SDK）之前，
    或第 3 次被生命周期报错折磨之后
 2. 中文版 purewhite 译本质量好且持续跟进；英文原版 `rustup doc --nomicon` 离线可读
 3. 读的时候准备一个 scratch project，每章的代码亲手跑一遍——

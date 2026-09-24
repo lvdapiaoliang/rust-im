@@ -61,7 +61,7 @@ HAL（硬件抽象层）的 Checklist/Naming/Interoperability/Predictability 四
 ## 阅读建议
 
 1. 现在只读第 1 章的 no_std 一节（30 分钟），建立 std/core/alloc 的边界感
-2. 阶段 6（im-sdk FFI）之前读第 10 章
+2. 阶段 11（im-sdk FFI）之前读第 10 章
 3. 对 Typestate 感兴趣时（patterns/01 之后）读第 4 章
 4. 其余内容除非未来真做 MCU，否则不必碰
 

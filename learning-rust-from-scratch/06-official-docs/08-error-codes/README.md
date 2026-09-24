@@ -88,7 +88,7 @@ rustc --explain E0507
 |----|------|
 | **E0716** | 临时值活不过引用——`let r = &foo().field;` 经典坑（tokio 篇 `&stream` 半包错误同源） |
 | **E0713** | 新生命周期引入破坏老代码 |
-| **E0658** | 用了 unstable 特性（阶段 8 io_uring 会遇到） |
+| **E0658** | 用了 unstable 特性（阶段 10 io_uring 压测会遇到） |
 | **E0601** | no_std 环境 println 不可用 |
 | **E0133** | unsafe 操作没包 unsafe 块（Nomicon 入口） |
 | **E0729** | 非 exhaustive match——新模式没处理（这正是 enum 状态机的保护机制，patterns/03） |

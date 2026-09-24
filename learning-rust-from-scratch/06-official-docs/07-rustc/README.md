@@ -60,7 +60,7 @@ rustup target add aarch64-linux-android
 cargo build --target aarch64-linux-android -p im-sdk
 ```
 
-阶段 6 的 im-sdk 要交付 Android/iOS/Windows/macOS/Linux 五端，
+阶段 11 的 im-sdk 要交付 Android/iOS/Windows/macOS/Linux 五端，
 每个 target 的链接器配置、动态库后缀、MSVC vs GNU 差异
 全部在这本书的 Targets 章和 Platform Support 页里。
 
