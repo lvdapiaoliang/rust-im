@@ -69,7 +69,7 @@ async fn expect_connected(events: &mut mpsc::Receiver<ClientEvent>) {
     }
 }
 
-/// 发一条消息并等到对应 Ack（返回服务端裁决的全局 msg_id）。
+/// 发一条消息并等到对应 Ack（返回服务端裁决的全局 `msg_id`）。
 async fn send_and_ack(
     handle: &ClientHandle,
     events: &mut mpsc::Receiver<ClientEvent>,
