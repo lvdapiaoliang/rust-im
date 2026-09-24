@@ -982,6 +982,7 @@ dependencies = [
  "im-storage",
  "im-transport",
  "ratatui",
+ "serde_json",
  "thiserror",
  "tokio",
 ]
