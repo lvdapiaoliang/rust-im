@@ -81,7 +81,7 @@ async fn send_and_ack(
         .await
         .expect("客户端存活");
     match next_event(events).await {
-        ClientEvent::Ack { msg_id } => msg_id,
+        ClientEvent::Ack { msg_id, .. } => msg_id,
         other => panic!("应收到 Ack，实际 {other:?}"),
     }
 }
@@ -116,7 +116,7 @@ async fn online_chat_then_offline_catchup_and_resume() {
     };
     assert_eq!(bob_msg.from, 1);
     let ack1 = match next_event(&mut alice.events).await {
-        ClientEvent::Ack { msg_id } => msg_id,
+        ClientEvent::Ack { msg_id, .. } => msg_id,
         other => panic!("Alice 应收到 Ack，实际 {other:?}"),
     };
     assert_eq!(ack1, bob_msg.msg_id);

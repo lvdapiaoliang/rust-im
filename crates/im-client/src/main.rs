@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
                 ClientEvent::Message(msg) => {
                     println!("[来自 {}] {}", msg.from, String::from_utf8_lossy(&msg.content));
                 }
-                ClientEvent::Ack { msg_id } => println!("[已送达 msg_id={msg_id}]"),
+                ClientEvent::Ack { msg_id, .. } => println!("[已送达 msg_id={msg_id}]"),
                 ClientEvent::SyncBatch(messages) => {
                     for msg in messages {
                         println!(

@@ -94,10 +94,15 @@ pub enum ClientEvent {
     Disconnected,
     /// 收到一条下行消息。
     Message(Msg),
-    /// 一条上行消息被服务端确认（`msg_id` 可用于消除本地「发送中」标记）。
+    /// 一条上行消息被服务端确认。
+    ///
+    /// `client_msg_id` 用于消除本地「发送中」标记（跨重发稳定）；
+    /// `msg_id` 是服务端裁决的全局 ID（排序/同步游标用）。
     Ack {
-        /// 被确认的全局消息 ID。
+        /// 服务端分配的全局消息 ID。
         msg_id: u64,
+        /// 发送方本地生成的去重键。
+        client_msg_id: u64,
     },
     /// 一批离线消息到达（连接建立后自动拉取）。
     SyncBatch(Vec<Msg>),
@@ -344,7 +349,8 @@ async fn message_loop(
 
             cmd = cmd_rx.recv() => match cmd {
                 Some(ClientCommand::SendMsg { to, content }) => {
-                    let msg = Msg { from: 0, to, msg_id: 0, content };
+                    // client_msg_id 暂填 0：p4-4 引入跨重连的生成器与重发表
+                    let msg = Msg { from: 0, to, msg_id: 0, client_msg_id: 0, content };
                     *send_seq += 1;
                     // 发送失败 = 本轮连接已死：交给断线路径
                     if handle.send(msg.encode_frame(*send_seq, 0)).await.is_err() {
@@ -367,7 +373,10 @@ async fn message_loop(
                     im_protocol::Cmd::MsgAck => {
                         if let Ok(ack) = MsgAck::decode_frame(&event.frame) {
                             if events
-                                .send(ClientEvent::Ack { msg_id: ack.msg_id })
+                                .send(ClientEvent::Ack {
+                                    msg_id: ack.msg_id,
+                                    client_msg_id: ack.client_msg_id,
+                                })
                                 .await
                                 .is_err()
                             {
@@ -509,7 +518,7 @@ mod tests {
         assert_eq!(bob_msg.content, Bytes::from_static(b"hello from alice"));
 
         let ack = match next_event(&mut alice.events).await {
-            ClientEvent::Ack { msg_id } => msg_id,
+            ClientEvent::Ack { msg_id, .. } => msg_id,
             other => panic!("Alice 应收到确认，实际 {other:?}"),
         };
         assert_eq!(ack, bob_msg.msg_id);
@@ -628,7 +637,7 @@ mod tests {
             .await
             .unwrap();
         let ack = match next_event(&mut bob.events).await {
-            ClientEvent::Ack { msg_id } => msg_id,
+            ClientEvent::Ack { msg_id, .. } => msg_id,
             other => panic!("重连后应能发消息，实际 {other:?}"),
         };
         assert_ne!(ack, 0);
