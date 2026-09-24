@@ -117,7 +117,7 @@ pub async fn deliver(&self, msg: &Msg) {
 
 ### 3.6 认证：`Authenticator` trait 依赖注入
 
-`AllowAll`（开发）/ `StaticToken`（演示）只是两个实现。阶段 7 换
+`AllowAll`（开发）/ `StaticToken`（演示）只是两个实现。阶段 12 换
 挑战-应答（E2EE 握手）时只换实现，`serve_connection` 一行不改——
 策略模式的通道版。
 
