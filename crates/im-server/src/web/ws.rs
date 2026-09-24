@@ -800,4 +800,123 @@ mod tests {
         let pong = client.recv().await;
         assert_eq!(pong["type"], envelope_type::PONG);
     }
+
+    /// 好友门槛（阶段 6）：非好友发单聊 → `not_friend` 错误信封，
+    /// 连接不断（协议错误 ≠ 连接错误）；不产生 ack、不入离线。
+    #[tokio::test]
+    async fn non_friend_msg_is_rejected_but_connection_survives() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (id_a, token_a) =
+            user_with_token(&state, &format!("ws_nf_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_b, token_b) =
+            user_with_token(&state, &format!("ws_nf_b_{}", uuid::Uuid::new_v4().simple())).await;
+        // 注意：刻意不 make_friends——非好友是被测前提
+
+        let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
+        let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
+        let _ = alice.recv().await; // 消化 welcome
+        let _ = bob.recv().await; // 消化 welcome
+
+        alice
+            .send(
+                envelope_type::MSG,
+                json!({ "to": id_b.to_string(), "client_msg_id": 1, "content": "stranger" }),
+            )
+            .await;
+        let err = alice.recv().await;
+        assert_eq!(err["type"], envelope_type::ERROR);
+        assert_eq!(err["payload"]["code"], "not_friend");
+
+        // Bob 侧零动静：不 ack、不投递、不入离线
+        assert_eq!(state.sessions.offline_count(id_b), 0);
+
+        // 连接仍活：Alice 群聊不受影响？——此处只验单聊拒绝后 ping 通
+        alice.send(envelope_type::PING, json!({})).await;
+        let pong = alice.recv().await;
+        assert_eq!(pong["type"], envelope_type::PONG);
+    }
+
+    /// 群消息不受好友门槛限制：非好友但同群，消息照常投递。
+    #[tokio::test]
+    async fn group_msg_bypasses_friend_gate() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (id_a, token_a) =
+            user_with_token(&state, &format!("ws_gr_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_b, token_b) =
+            user_with_token(&state, &format!("ws_gr_b_{}", uuid::Uuid::new_v4().simple())).await;
+
+        // A 建群拉 B（非好友入同一群）
+        let group = state
+            .groups
+            .create_group(&state.sessions, "gate-check", id_a)
+            .await
+            .expect("建群应成功");
+        state.groups.add_member(group.id, id_a, id_b).await.expect("拉人应成功");
+
+        let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
+        let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
+        let _ = alice.recv().await; // 消化 welcome
+        let _ = bob.recv().await; // 消化 welcome
+
+        // 群内单条消息的扇出是阶段 7 的工作——这里验证的是「门槛不拦群消息」：
+        // 消息进入会话核心（有 ack）而非被 not_friend 拒绝
+        alice
+            .send(
+                envelope_type::MSG,
+                json!({ "to": group.id.to_string(), "client_msg_id": 1, "content": "to group" }),
+            )
+            .await;
+        let ack = alice.recv().await;
+        assert_eq!(ack["type"], envelope_type::MSG_ACK, "群消息不应被好友门槛拒绝");
+    }
+
+    /// 事件推送（阶段 6）：REST 发起好友请求，在线的接收方 WS 实时收到
+    /// `event` 信封（服务端主动推送的首个真实场景）。
+    #[tokio::test]
+    async fn friend_request_pushes_event_to_online_receiver() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (id_a, _token_a) =
+            user_with_token(&state, &format!("ws_ev_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (_id_b, token_b) =
+            user_with_token(&state, &format!("ws_ev_b_{}", uuid::Uuid::new_v4().simple())).await;
+
+        // B 先在线（事件只推给在线者；A 不需要连接——发起走仓储）
+        let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
+        let _ = bob.recv().await; // 消化 welcome
+
+        // A 直连仓储发起请求（REST 处理器触发同一仓储方法 + 同一推送）
+        let view = state
+            .friends
+            .create_request(&state.sessions, id_a, _id_b)
+            .await
+            .expect("请求应成功");
+        // —— 与 REST 处理器同构的推送（处理器代码的镜像，验证协议层）
+        let payload = json!({
+            "kind": "friend_request",
+            "request": {
+                "id": view.id.to_string(),
+                "from_user": view.from_user.to_string(),
+                "from_username": view.from_username,
+                "to_user": view.to_user.to_string(),
+                "to_username": view.to_username,
+                "status": view.status,
+            },
+        });
+        let delivered = state.sessions.push_event(_id_b, payload.to_string()).await;
+        assert!(delivered, "在线接收方应收到事件");
+
+        let event = bob.recv().await;
+        assert_eq!(event["type"], envelope_type::EVENT);
+        assert_eq!(event["payload"]["kind"], "friend_request");
+        assert_eq!(event["payload"]["request"]["from_user"], id_a.to_string());
+    }
 }
