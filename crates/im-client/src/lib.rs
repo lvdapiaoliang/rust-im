@@ -8,7 +8,10 @@
 //! - `docs/07-client.md`（阶段 4 编写）
 //! - `learning-rust-from-scratch/03-tokio/`：select、channel、超时与取消
 
+pub mod chat;
 pub mod client;
+mod dedup;
 mod outbox;
 
+pub use chat::{ChatMsg, ChatState, Conversation, SendStatus};
 pub use client::{run_client, ClientConfig, ClientError, ClientEvent, ClientHandle};
