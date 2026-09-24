@@ -26,8 +26,30 @@ export interface Conversation {
   name: string
 }
 
-/** 消息内容：阶段 5 只有文本；阶段 6 扩展 {"kind":"file"|...}。 */
-export type MessageContent = string
+/** 消息正文（判别联合，kind 标签区分形态——与 docs/12-web-protocol.md §消息内容模型对应）。 */
+export type MessageBody =
+  | { kind: 'text'; text: string }
+  | { kind: 'emoji'; emoji: string }
+  | { kind: 'image'; file_id: string; filename: string; size_bytes: number }
+  | { kind: 'file'; file_id: string; filename: string; size_bytes: number }
+
+/**
+ * 消息内容：新消息是 MessageBody（对象）；阶段 5 的旧消息可能是裸字符串，
+ * 展示层统一经 parseContent 归一（服务端从不解释 content，兼容是纯前端职责）。
+ */
+export type MessageContent = MessageBody | string
+
+/** 内容归一：裸字符串/无法识别的对象都降级为 text（展示降级优于丢消息）。 */
+export function parseContent(content: MessageContent): MessageBody {
+  if (typeof content === 'string') return { kind: 'text', text: content }
+  if (content !== null && typeof content === 'object' && 'kind' in content) {
+    const body = content as MessageBody
+    if (body.kind === 'text' || body.kind === 'emoji' || body.kind === 'image' || body.kind === 'file') {
+      return body
+    }
+  }
+  return { kind: 'text', text: JSON.stringify(content) }
+}
 
 /** 聊天消息（本地状态：含发送状态机）。 */
 export interface ChatMessage {
@@ -38,8 +60,10 @@ export interface ChatMessage {
   from: string
   to: string
   content: MessageContent
-  /** sending = 已发出未确认；sent = 服务端已接管（有 msg_id）。 */
-  status: 'sending' | 'sent'
+  /** sending = 已发出未确认；sent = 服务端已接管；failed = 服务端拒绝（如非好友）。 */
+  status: 'sending' | 'sent' | 'failed'
+  /** 拒绝原因（failed 时展示）。 */
+  failReason?: string
   ts: number
 }
 
@@ -77,8 +101,34 @@ export interface WelcomePayload {
   reason: string
 }
 
-/** 下行 error 信封载荷。 */
+/** 下行 error 信封载荷（client_msg_id 仅在消息被拒时携带——关联乐观消息用）。 */
 export interface ErrorPayload {
   code: string
   message: string
+  client_msg_id?: string
 }
+
+/** 文件元数据（POST /api/files 响应）。 */
+export interface FileMeta {
+  id: string
+  owner_id: string
+  filename: string
+  size_bytes: number
+  sha256: string
+}
+
+/** 好友请求视图（REST 出参与事件载荷共用）。 */
+export interface FriendRequestView {
+  id: string
+  from_user: string
+  from_username: string
+  to_user: string
+  to_username: string
+  status: string
+}
+
+/** 下行 event 信封载荷（好友事件；kind 判别，后端新增事件零协议改动）。 */
+export type FriendEvent =
+  | { kind: 'friend_request'; request: FriendRequestView }
+  | { kind: 'friend_accepted'; user: User; by: User }
+  | { kind: 'friend_removed'; user: User }
