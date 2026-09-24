@@ -116,7 +116,9 @@ impl Backoff {
         let shift = self.attempt.min(63);
         let factor = 1u64 << shift;
         let base_nanos = self.base.as_nanos().saturating_mul(u128::from(factor));
-        let capped = Duration::from_nanos(base_nanos.min(u64::MAX as u128) as u64);
+        // Duration 内部是 u64 秒 + u32 纳秒，构造前先饱和到 u64 纳秒上限
+        let capped_nanos = base_nanos.min(u128::from(u64::MAX));
+        let capped = Duration::from_nanos(u64::try_from(capped_nanos).unwrap_or(u64::MAX));
         capped.min(self.max)
     }
 
@@ -133,8 +135,10 @@ impl Backoff {
 fn seed_from_system() -> u64 {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0x9E37_79B9_7F4A_7C15);
+        .map_or(0x9E37_79B9_7F4A_7C15, |d| {
+            // 秒与亚秒纳秒混合：两进程同时启动也有大概率不同种子
+            u64::from(d.subsec_nanos()) ^ d.as_secs()
+        });
     nanos | 1 // xorshift 状态不能为 0
 }
 
@@ -188,9 +192,9 @@ mod tests {
     fn attempts_and_reset() {
         let mut b = Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
         assert_eq!(b.attempts(), 0);
-        b.next_delay();
-        b.next_delay();
-        b.next_delay();
+        let _ = b.next_delay();
+        let _ = b.next_delay();
+        let _ = b.next_delay();
         assert_eq!(b.attempts(), 3);
         b.reset();
         assert_eq!(b.attempts(), 0);
@@ -212,6 +216,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "base 必须为正")]
     fn zero_base_is_rejected() {
-        Backoff::new(Duration::ZERO, Duration::from_secs(1));
+        let _ = Backoff::new(Duration::ZERO, Duration::from_secs(1));
     }
 }
