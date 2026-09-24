@@ -189,7 +189,7 @@ impl FriendStore {
         by_user: u64,
     ) -> Result<Option<User>, FriendError> {
         let mut tx = self.pool.begin().await?;
-    
+
         // 带状态条件的 UPDATE：天然实现「只有收方能处理 pending 请求」
         let from_user: Option<i64> = sqlx::query_scalar(
             "UPDATE friend_requests SET status = 'accepted'
@@ -200,13 +200,13 @@ impl FriendStore {
         .bind(id_i64(by_user))
         .fetch_optional(&mut *tx)
         .await?;
-    
+
         let Some(from_user) = from_user else {
             // 不回滚也无妨（什么都没改），但显式回滚语义更清晰
             tx.rollback().await?;
             return Err(FriendError::RequestNotFound);
         };
-    
+
         // 无向边：小 ID 恒在前（表结构 CHECK 兕底）
         let a = from_user.min(id_i64(by_user));
         let b = from_user.max(id_i64(by_user));
@@ -219,16 +219,15 @@ impl FriendStore {
         .bind(b)
         .execute(&mut *tx)
         .await?;
-    
+
         // 对方用户信息（事件载荷）：主键点查，与事务无依赖——事务先落地
         // （关系成立是硬承诺，事件是软补充）
         tx.commit().await?;
-        let counterpart = sqlx::query_as::<_, User>(
-            "SELECT id, username, display_name FROM users WHERE id = $1",
-        )
-        .bind(from_user)
-        .fetch_optional(&self.pool)
-        .await?;
+        let counterpart =
+            sqlx::query_as::<_, User>("SELECT id, username, display_name FROM users WHERE id = $1")
+                .bind(from_user)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(counterpart)
     }
 
@@ -303,12 +302,11 @@ impl FriendStore {
         .execute(&mut *tx)
         .await?;
         // 对方信息（事件载荷）：查完再 commit（同事务视图，避免删后查不到）
-        let counterpart = sqlx::query_as::<_, User>(
-            "SELECT id, username, display_name FROM users WHERE id = $1",
-        )
-        .bind(id_i64(other))
-        .fetch_optional(&mut *tx)
-        .await?;
+        let counterpart =
+            sqlx::query_as::<_, User>("SELECT id, username, display_name FROM users WHERE id = $1")
+                .bind(id_i64(other))
+                .fetch_optional(&mut *tx)
+                .await?;
         tx.commit().await?;
         Ok(counterpart)
     }

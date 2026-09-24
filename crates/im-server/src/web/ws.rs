@@ -44,7 +44,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use crate::session::{SessionState, Sessions, handle_frame, reply};
+use crate::session::{SessionState, handle_frame, reply};
 use crate::sink::{FrameSink, SendFuture};
 
 use super::api::AppState;
@@ -67,9 +67,9 @@ mod envelope_type {
     pub const PONG: &str = "pong";
     /// 下行：协议错误（坏信封/未知类型），连接不断。
     pub const ERROR: &str = "error";
-    /// 下行：服务端主动事件（好友请求/被接受/被删除等，阶段 6；
-    /// 载荷自带 `kind` 子类型——事件总线模式，新事件零协议改动）。
-    pub const EVENT: &str = "event";
+    // 注：`event`（服务端主动事件，阶段 6）不在此列——它不是翻译层
+    // 的产物，而是 REST 层经 `Sessions::push_event` 直通的已组装信封
+    // （见 session.rs；payload 自带 `kind` 子类型，新事件零协议改动）。
 }
 
 /// 出站通道容量：下行推送（消息/事件/回执）+ 控制帧的缓冲上限。
@@ -449,7 +449,7 @@ async fn dispatch_inbound(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::SessionConfig;
+    use crate::session::{SessionConfig, Sessions};
     use crate::web::db::testing::pool_or_skip;
 
     /// 翻译层：msg 上行往返（信封 → 帧 → 载荷字段一致，content 整体序列化）。
@@ -813,7 +813,8 @@ mod tests {
             user_with_token(&state, &format!("ws_nf_a_{}", uuid::Uuid::new_v4().simple())).await;
         let (id_b, token_b) =
             user_with_token(&state, &format!("ws_nf_b_{}", uuid::Uuid::new_v4().simple())).await;
-        // 注意：刻意不 make_friends——非好友是被测前提
+        // 注意：刻意不 make_friends——非好友是被测前提（id_a 仅供注册，消息不引用）
+        let _ = id_a;
 
         let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
         let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
@@ -886,7 +887,7 @@ mod tests {
         };
         let (id_a, _token_a) =
             user_with_token(&state, &format!("ws_ev_a_{}", uuid::Uuid::new_v4().simple())).await;
-        let (_id_b, token_b) =
+        let (id_b, token_b) =
             user_with_token(&state, &format!("ws_ev_b_{}", uuid::Uuid::new_v4().simple())).await;
 
         // B 先在线（事件只推给在线者；A 不需要连接——发起走仓储）
@@ -894,11 +895,8 @@ mod tests {
         let _ = bob.recv().await; // 消化 welcome
 
         // A 直连仓储发起请求（REST 处理器触发同一仓储方法 + 同一推送）
-        let view = state
-            .friends
-            .create_request(&state.sessions, id_a, _id_b)
-            .await
-            .expect("请求应成功");
+        let view =
+            state.friends.create_request(&state.sessions, id_a, id_b).await.expect("请求应成功");
         // —— 与 REST 处理器同构的推送（处理器代码的镜像，验证协议层）
         let payload = json!({
             "kind": "friend_request",
@@ -911,11 +909,11 @@ mod tests {
                 "status": view.status,
             },
         });
-        let delivered = state.sessions.push_event(_id_b, payload.to_string()).await;
+        let delivered = state.sessions.push_event(id_b, payload.to_string()).await;
         assert!(delivered, "在线接收方应收到事件");
 
         let event = bob.recv().await;
-        assert_eq!(event["type"], envelope_type::EVENT);
+        assert_eq!(event["type"], "event");
         assert_eq!(event["payload"]["kind"], "friend_request");
         assert_eq!(event["payload"]["request"]["from_user"], id_a.to_string());
     }

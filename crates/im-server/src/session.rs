@@ -308,9 +308,7 @@ impl Sessions {
         let seq = session.send_seq.fetch_add(1, Ordering::Relaxed) + 1;
         // 事件不是协议帧，但下行 seq 仍要占用：保证接收方看到的
         // seq 单调（它与帧共用一条出站通道，序号空间不能分叉）
-        let envelope = format!(
-            r#"{{"type":"event","seq":{seq},"ack":0,"payload":{text}}}"#
-        );
+        let envelope = format!(r#"{{"type":"event","seq":{seq},"ack":0,"payload":{text}}}"#);
         session.sink.send_text(envelope).await.is_ok()
     }
 
@@ -702,9 +700,9 @@ mod tests {
 
     impl crate::sink::FrameSink for TestTextSink {
         fn send(&self, frame: im_protocol::Frame) -> crate::sink::SendFuture<'_> {
-            Box::pin(async move {
-                self.0.send(Some(frame)).await.map_err(|_| TransportError::Closed)
-            })
+            Box::pin(
+                async move { self.0.send(Some(frame)).await.map_err(|_| TransportError::Closed) },
+            )
         }
 
         fn send_text(&self, _text: String) -> crate::sink::SendFuture<'_> {
@@ -826,10 +824,7 @@ mod tests {
         let (tx2, mut rx2) = mpsc::channel(4);
         sessions.register(2, 2, Arc::new(TestSink(tx2))).expect("首个注册不应冲突");
         assert!(!sessions.push_event(2, "{}".to_string()).await);
-        assert!(
-            timeout(Duration::from_millis(300), rx2.recv()).await.is_err(),
-            "事件不应走帧通道"
-        );
+        assert!(timeout(Duration::from_millis(300), rx2.recv()).await.is_err(), "事件不应走帧通道");
 
         // 离线：false，且不产生离线积压（事件不降级）
         assert!(!sessions.push_event(3, "{}".to_string()).await);

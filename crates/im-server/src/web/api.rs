@@ -337,7 +337,7 @@ fn user_json(user: &User) -> serde_json::Value {
 
 /// POST /api/friends/requests：发起好友请求。
 ///
-/// 接收方在线则实时收到 `event` 信封（kind = friend_request）；
+/// 接收方在线则实时收到 `event` 信封（`kind = "friend_request"`）；
 /// 离线则放弃——下次登录拉列表自然看到（事件的尽力而为语义）。
 async fn create_friend_request(
     State(state): State<AppState>,
