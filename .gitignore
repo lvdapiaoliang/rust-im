@@ -1,0 +1,9 @@
+# 构建产物（每次 cargo build 重新生成，体积巨大，绝不入库）
+/target
+
+# RustRover / IntelliJ 局部文件
+.idea/workspace.xml
+.idea/shelf/
+
+# Windows
+Thumbs.db
