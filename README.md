@@ -4,8 +4,8 @@
 
 ## 项目状态
 
-**阶段 0~3 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）
-加最小客户端，全链路 e2e 测试跑通。
+**阶段 0~4 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
+客户端消息级重传 + 自研本地库（LSM 思想）+ ratatui TUI，全链路 e2e 含崩溃重传场景。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
@@ -13,7 +13,7 @@
 | 1 | 二进制协议（帧编解码 / 粘包处理） | ✅ |
 | 2 | 传输层（心跳 / 重连 / seq-ACK / 优雅关闭；TLS 移至阶段 7 前置） | ✅ |
 | 3 | 服务端（认证 / 会话路由 / 离线补投 / 雪花 ID）+ 最小客户端 | ✅ |
-| 4 | 客户端（TUI / 消息同步 / 本地库） | ⬜ |
+| 4 | 客户端（消息重传 / 本地库 / TUI / 消息同步） | ✅ |
 | 5 | 压测（10万 → 100万 → 500万连接三级里程碑） | ⬜ |
 | 6 | FFI SDK（C ABI 动态库 / JNI） | ⬜ |
 | 7 | 桌面端（Tauri）+ E2EE（Signal 协议） | ⬜ |
@@ -27,8 +27,12 @@ cargo test --workspace        # 全量测试
 cargo clippy --workspace --all-targets   # 静态检查（零警告）
 cargo run -p im-transport --example echo_demo   # 运行阶段 0 示例
 cargo run -p im-server                     # 起服务端（默认 127.0.0.1:8888）
-cargo run -p im-client 127.0.0.1:8888 1 demo    # 起客户端（`to 内容` 发消息）
+cargo run -p im-client 127.0.0.1:8888 1 demo    # 起 TUI 客户端
 ```
+
+TUI 按键：`/to <user_id>` 新会话 · `Tab` 切换会话 · Enter 发送 ·
+PageUp/Down 翻历史 · `/quit` 或 Esc 退出。本地消息库与重发表持久化在
+`im-client-data/`（重启不丢）。
 
 ## 代码结构
 
@@ -37,9 +41,9 @@ crates/
 ├── im-protocol/   二进制协议：帧编解码、命令字、seq/ack、粘包处理
 ├── im-transport/  传输层：Tokio TCP 长连接、心跳、重连、TLS
 ├── im-crypto/     加密层：TLS 材料、E2EE Signal 双棘轮
-├── im-storage/    存储层：SQLite → SQLCipher、WAL 写入
+├── im-storage/    存储层：自研简化 LSM（追加段/memtable/压实）+ WAL 恢复
 ├── im-server/     服务端：网关、会话路由、消息扇出
-├── im-client/     客户端：CLI/TUI → 桌面端
+├── im-client/     客户端：消息重传/本地库/ratatui TUI → 桌面端
 ├── im-sdk/        FFI SDK：C ABI 动态库（.so/.dll/.dylib）
 ├── im-bench/      压测：连接风暴、吞吐基准、弱网模拟
 └── xtask/         构建任务：交叉编译、SDK 打包
@@ -55,7 +59,8 @@ crates/
 - [04 - 二进制协议设计](docs/04-protocol-design.md)（阶段 1）
 - [05 - 传输层设计](docs/05-network-tokio.md)（阶段 2）
 - [06 - 服务端架构](docs/06-server-arch.md)（阶段 3）
-- 07~11 随开发阶段逐步补充
+- [07 - 客户端：消息可靠性、本地库与 TUI](docs/07-client.md)（阶段 4）
+- 08~11 随开发阶段逐步补充
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 

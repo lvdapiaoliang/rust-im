@@ -57,7 +57,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 1 | 二进制协议：帧格式 / 编解码 / 粘包 | `im-protocol` | 04 | ✅ 已完成 |
 | 2 | 传输层：心跳 / 重连 / seq-ACK / 优雅关闭（TLS 移至阶段 7 前置实现） | `im-transport` | 05 | ✅ 已完成 |
 | 3 | 服务端：会话路由 / 离线补投 / 雪花 ID + 最小客户端 + e2e | `im-server` + `im-client` | 06 | ✅ 已完成 |
-| 4 | 客户端：TUI / 消息同步 / 本地库 | `im-client` | 07 | 未开始 |
+| 4 | 客户端：消息重传 / 本地库 / TUI / 消息同步 | `im-client` + `im-storage` | 07 | ✅ 已完成 |
 | 5 | 压测与三级性能里程碑 | `im-bench` | 08 | 未开始 |
 | 6 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 09 | 未开始 |
 | 7 | 桌面端（Tauri）+ E2EE（Signal） | `im-client` + `im-crypto` | 10 | 未开始 |
@@ -133,7 +133,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 分片并发哈希表（Sharded HashMap） | 会话路由表：理解 `DashMap` 内部的锁分片思想 | 阶段 3 手写简化版 |
 | 雪花 ID（位段分配 + 时钟回拨处理） | 全局消息 ID 生成 | 阶段 3 |
 | 小顶堆 / 分位数草图 | P99 延迟统计（压测的核心数据结构） | 阶段 5 |
-| B+ 树 / LSM 思想 | 本地消息库索引、写前日志（理解 SQLite/RocksDB 原理） | 阶段 3/4 |
+| B+ 树 / LSM 思想 | 本地消息库索引、写前日志（理解 SQLite/RocksDB 原理） | 阶段 4（自研简化 LSM） |
 | 布隆过滤器 | 在线状态/已读去重的概率性预判 | 阶段 8 扩展 |
 
 #### 算法
