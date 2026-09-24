@@ -12,6 +12,7 @@
 //!    随后回复 Alice——重连后的双向会话照常工作。
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,8 +35,16 @@ struct OnlineClient {
 }
 
 /// 上线一个客户端（AllowAll 认证下 token 随意给）。
-async fn login(addr: SocketAddr, user_id: u64) -> OnlineClient {
-    let config = ClientConfig::new(addr.to_string(), user_id, "any");
+///
+/// `data_dir` 由调用方指定且同一用户重连必须复用同一目录：
+/// `client_msg_id` 由本地库的单调计数器分配，换目录等于计数器
+/// 归零——发出的新消息可能撞上接收方的去重窗口被静默丢弃
+/// （生产语义里同一用户的库是持久的，这里对齐真实约束）。
+async fn login(addr: SocketAddr, user_id: u64, data_dir: PathBuf) -> OnlineClient {
+    let config = ClientConfig {
+        data_dir: Some(data_dir),
+        ..ClientConfig::new(addr.to_string(), user_id, "any")
+    };
     let (events_tx, events_rx) = mpsc::channel(64);
     let (shutdown_tx, shutdown_rx) = im_transport::shutdown_channel();
     let handle = run_client(config, events_tx, shutdown_rx).await;
@@ -99,13 +108,24 @@ async fn online_chat_then_offline_catchup_and_resume() {
     .await
     .expect("服务应能启动");
 
+    // 每个用户一个固定本地库目录（进程内唯一）：重连复用、
+    // client_msg_id 单调递增（见 `login` 文档）
+    let base = std::env::temp_dir().join(format!(
+        "im-e2e-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("系统时钟正常")
+            .as_nanos(),
+    ));
+    let alice_dir = base.join("1");
+    let bob_dir = base.join("2");
+
     // ── 第 1 幕：在线互发 ──
-    eprintln!("[probe] act1 start");
-    let mut alice = login(addr, 1).await;
-    let mut bob = login(addr, 2).await;
+    let mut alice = login(addr, 1, alice_dir).await;
+    let mut bob = login(addr, 2, bob_dir.clone()).await;
     expect_connected(&mut alice.events).await;
     expect_connected(&mut bob.events).await;
-    eprintln!("[probe] act1 both connected");
 
     // Alice → Bob：Bob 收到消息、Alice 收到 Ack，msg_id 一致
     alice
@@ -123,7 +143,6 @@ async fn online_chat_then_offline_catchup_and_resume() {
         other => panic!("Alice 应收到 Ack，实际 {other:?}"),
     };
     assert_eq!(ack1, bob_msg.msg_id);
-    eprintln!("[probe] act1 alice acked");
 
     // Bob → Alice：双向都要通
     bob.handle
@@ -146,7 +165,6 @@ async fn online_chat_then_offline_catchup_and_resume() {
     // 不等的话下一条消息可能撞上「路由还在、连接将死」的窗口
     // （生产环境靠阶段 4 的 Ack 重发兜底，测试里直接规避）。
     sleep(SETTLE).await;
-    eprintln!("[probe] act2 bob gone, sending offline");
 
     let id1 = send_and_ack(&alice.handle, &mut alice.events, 2, b"offline 1").await;
     let id2 = send_and_ack(&alice.handle, &mut alice.events, 2, b"offline 2").await;
@@ -156,13 +174,8 @@ async fn online_chat_then_offline_catchup_and_resume() {
     );
 
     // ── 第 3 幕：Bob 回来，自动补投 + 恢复双向 ──
-    eprintln!(
-        "[probe] act3 bob back, offline_count(2) = {}",
-        _sessions.offline_count(2)
-    );
-    let mut bob = login(addr, 2).await;
+    let mut bob = login(addr, 2, bob_dir).await;
     expect_connected(&mut bob.events).await;
-    eprintln!("[probe] act3 bob connected, waiting sync");
 
     let batch = match next_event(&mut bob.events).await {
         ClientEvent::SyncBatch(messages) => messages,
@@ -173,7 +186,6 @@ async fn online_chat_then_offline_catchup_and_resume() {
     assert_eq!(batch[1].msg_id, id2, "补投按 msg_id 升序");
     assert_eq!(batch[0].content, Bytes::from_static(b"offline 1"));
     assert_eq!(batch[1].content, Bytes::from_static(b"offline 2"));
-    eprintln!("[probe] act3 batch asserted, bob replying");
 
     // 恢复双向：Bob 回复，Alice 立刻收到
     bob.handle
