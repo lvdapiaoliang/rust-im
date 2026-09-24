@@ -184,16 +184,22 @@ impl Engine {
         }
         segment_ids.sort_unstable();
 
-        // 封存段：全部建索引
+        // 封存段：全部建索引（含崩溃前的活跃段——重开后统一按封存段对待，
+        // 追加写从新段继续；段数增长由 compact 兕底）
         let mut segments = Vec::new();
         for &id in &segment_ids {
             let path = segment_path(&dir, id);
             let file = File::open(&path)?;
             let index = build_index(BufReader::new(&file))?;
-            segments.push(SealedSegment { file, index });
+            segments.push(SealedSegment {
+                id,
+                file,
+                index,
+            });
         }
 
-        // 活跃段 = 最大段号（不存在则新建 0 号段）
+        // 活跃段 = 新段号（旧段全部封存；路径存在说明上次创建后即崩溃，
+        // 重放防御性处理，通常为空）
         let active_id = segment_ids.last().map_or(0, |id| id + 1);
         let active_path = segment_path(&dir, active_id);
         let (memtable, count) = if active_path.exists() {
