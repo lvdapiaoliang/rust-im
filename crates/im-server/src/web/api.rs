@@ -542,7 +542,10 @@ mod tests {
             ))
             .unwrap();
         let resp = app.clone().oneshot(register).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::CREATED, "注册应返回 201");
+        if resp.status() != StatusCode::CREATED {
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            panic!("注册应返回 201，实际响应体: {}", String::from_utf8_lossy(&body));
+        }
 
         let login = Request::post("/api/login")
             .header(header::CONTENT_TYPE, "application/json")
