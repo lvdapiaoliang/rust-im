@@ -181,19 +181,68 @@ pub async fn run_gateway_connection(
     inbound: mpsc::Sender<InboundFrame>,
     shutdown: ShutdownRx,
 ) -> Result<(), TransportError> {
+    let (_handle, task) = spawn_gateway(stream, config, inbound, shutdown);
+    task.await.expect("网关 task 不应 panic")
+}
+
+/// [`run_gateway_connection`] 的拆分版：spawn 网关 task 并**立刻**返回发送句柄。
+///
+/// 两者分工：
+/// - [`run_gateway_connection`]：`async fn` 形态，调用方 await 它直到连接终结
+///   （服务端每连接一个 task 的自然写法）；
+/// - [`spawn_gateway`]：需要**在收到任何入站帧之前**就发帧的场景——
+///   典型是客户端：握手帧是第一个上行帧，不可能等入站事件把句柄送过来
+///   （句柄随 [`InboundFrame`] 附带）。
+///
+/// 返回的句柄在 task 结束后 `send` 会报 [`TransportError::Closed`]。
+///
+/// # Panics
+///
+/// 返回的 `JoinHandle` 被上游 `await` 时，若网关 task panic 则向上传播 panic。
+#[must_use = "丢弃 JoinHandle 会丢掉连接的结束原因；句柄则可按需保留"]
+pub fn spawn_gateway(
+    stream: TcpStream,
+    config: GatewayConfig,
+    inbound: mpsc::Sender<InboundFrame>,
+    shutdown: ShutdownRx,
+) -> (
+    ConnectionHandle,
+    tokio::task::JoinHandle<Result<(), TransportError>>,
+) {
+    // 出站通道 + 写 actor：独占写半部，消费所有发送方的帧
+    let (tx, rx) = mpsc::channel(OUTBOUND_CHANNEL_CAPACITY);
+    let handle = ConnectionHandle { tx };
+
+    let task = tokio::spawn(gateway_lifecycle(
+        stream,
+        config,
+        inbound,
+        rx,
+        handle.clone(),
+        shutdown,
+    ));
+    (handle, task)
+}
+
+/// 网关生命周期主体（由 [`spawn_gateway`] 启动）：
+/// 读循环 + 写 actor + 心跳 + 超时 + 优雅关闭。
+async fn gateway_lifecycle(
+    stream: TcpStream,
+    config: GatewayConfig,
+    inbound: mpsc::Sender<InboundFrame>,
+    outbound_rx: mpsc::Receiver<Frame>,
+    handle: ConnectionHandle,
+    shutdown: ShutdownRx,
+) -> Result<(), TransportError> {
     let peer = stream.peer_addr().ok();
 
     // 本连接内部的关停信号：读循环结束时触发，停掉心跳与写 actor。
     // 与外部 shutdown 的分工：外部 =「整个服务要停」，内部 =「这条连接要收尾」。
     let (done_tx, done_rx) = shutdown_channel();
 
-    // 出站通道 + 写 actor：独占写半部，消费所有发送方的帧
-    let (tx, rx) = mpsc::channel(OUTBOUND_CHANNEL_CAPACITY);
-    let handle = ConnectionHandle { tx };
-
     let (reader, writer) =
         Connection::with_max_frame_len(stream, config.max_frame_len).into_split();
-    let writer_task = spawn_writer(writer, rx, done_rx.clone());
+    let writer_task = spawn_writer(writer, outbound_rx, done_rx.clone());
 
     // 心跳 task：仅客户端角色需要（服务端的「心跳」就是及时回 Pong）
     let heartbeat_task = match config.heartbeat {

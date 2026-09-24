@@ -60,8 +60,8 @@ pub use connection::{Connection, ReadHalf, WriteHalf};
 pub use dedup::{DedupWindow, Verdict, WINDOW_SIZE};
 pub use error::TransportError;
 pub use gateway::{
-    run_gateway_connection, ConnectionHandle, GatewayConfig, HeartbeatPolicy, InboundFrame,
-    DEFAULT_IDLE_TIMEOUT,
+    run_gateway_connection, spawn_gateway, ConnectionHandle, GatewayConfig, HeartbeatPolicy,
+    InboundFrame, DEFAULT_IDLE_TIMEOUT,
 };
 pub use shutdown::{shutdown_channel, ShutdownRx, ShutdownTx};
 
