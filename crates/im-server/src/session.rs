@@ -335,7 +335,10 @@ impl Sessions {
 // ────────────────────────────────────────────────────────────────
 
 /// 一条连接上的会话状态（会话 task 独占，零共享）。
-struct SessionState {
+///
+/// `pub(crate)`：TCP 会话 task 与 WS 网关（阶段 5 web 模块）各自持有一份，
+/// 状态机逻辑（去重/下行 seq）只有这一个实现。
+pub(crate) struct SessionState {
     /// 认证通过的用户 ID（`None` = 未登录）。
     user: Option<u64>,
     /// 服务端下行帧序号（下一个待用值 + 1，从 1 开始）。
@@ -348,12 +351,21 @@ struct SessionState {
 }
 
 impl SessionState {
+    /// 未认证的初始状态（TCP 路径：等 `Handshake` 帧推进）。
     fn new() -> Self {
         Self { user: None, send_seq: 0, dedup: None }
     }
 
+    /// 已认证状态（WS 路径：鉴权在 HTTP 升级前完成，无需握手帧）。
+    ///
+    /// 与 `handle_handshake` 成功后的状态等价——同一条状态机的两个入口，
+/// 剩余生命周期（去重、消息、同步、回执 seq）完全共用。
+    pub(crate) fn authenticated(user_id: u64) -> Self {
+        Self { user: Some(user_id), send_seq: 0, dedup: None }
+    }
+
     /// 喂入一帧的 seq，返回去重判定。
-    fn feed_seq(&mut self, seq: u64) -> Verdict {
+    pub(crate) fn feed_seq(&mut self, seq: u64) -> Verdict {
         if let Some(window) = self.dedup.as_mut() {
             return window.feed(seq);
         }
@@ -373,7 +385,9 @@ impl SessionState {
 /// 回一帧载荷：分配下行 seq，填帧级累计确认，送出。
 ///
 /// `sink` 是抽象发送端——TCP 与 WS 路径在此汇合（传输解耦的落点）。
-async fn reply<T: Payload>(
+/// `pub(crate)`：WS 网关也用它下发连接就绪（`welcome`）帧，保证下行
+/// seq 单调的语义只有这一个实现。
+pub(crate) async fn reply<T: Payload>(
     state: &mut SessionState,
     sink: &Arc<dyn FrameSink>,
     payload: &T,
@@ -444,7 +458,7 @@ pub async fn serve_connection(
 ///
 /// 帧与发送端分开传：`frame` 是协议层解码产物，`sink` 是抽象发送端
 /// ——TCP 与 WS 路径都能调这里（WS 网关把 JSON 信封译成 Frame 后复用）。
-async fn handle_frame(
+pub(crate) async fn handle_frame(
     sessions: &Sessions,
     state: &mut SessionState,
     conn_id: u64,

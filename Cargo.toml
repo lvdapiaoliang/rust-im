@@ -41,7 +41,7 @@ anyhow = "1"
 # ---- 序列化（协议层用）----
 bytes = "1"
 
-# ---- TUI（im-client 的终端界面）----
+# ---- TUI（im-client 的终端界面）+ 异步流工具（futures 也供 im-server 的 WS split 用）----
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 futures = "0.3"
@@ -65,6 +65,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 
 # ---- 测试 ----
 tokio-test = "0.4"
+tokio-tungstenite = "0.26"
 
 [workspace.lints.rust]
 unsafe_code = "warn" # SDK 层 FFI 需要时再显式允许，其他 crate 默认审视 unsafe
