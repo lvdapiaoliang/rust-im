@@ -964,9 +964,11 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap",
+ "im-client",
  "im-protocol",
  "im-server",
  "im-transport",
+ "socket2",
  "tokio",
 ]
 
