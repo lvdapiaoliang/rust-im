@@ -368,8 +368,10 @@ mod tests {
         }
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.mru_order(), vec![&k("key99"), &k("key98")]);
-        // 100 轮淘汰/插入后，只有两个槽位被占用——free-list 复用在干活
-        assert_eq!(cache.slots.len(), 2, "slab 不该随插入次数增长");
+        // slab 的稳定上界是容量+1：插入到第 3 个才触发首次淘汰
+        // （先超容、再踢回），之后每次淘汰都把槽位还回 free-list，
+        // 100 轮插入 slab 也停在 3——复用在干活，不是无限扩张
+        assert_eq!(cache.slots.len(), 3, "slab 稳定在容量+1，不随插入次数增长");
         // 全量下标访问一遍，串线（指向已空槽位）会当场 panic
         assert_eq!(cache.peek(&k("key99")), Some(&99));
         assert_eq!(cache.peek(&k("key98")), Some(&98));
