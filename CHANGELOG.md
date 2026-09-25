@@ -10,7 +10,7 @@ workspace 管理（根 `Cargo.toml` 的 `[workspace.package]`，一处 bump 全 
 
 待下一阶段补充。
 
-## [0.1.0] —— 阶段 0~13（待打 tag 发布）
+## [0.1.0] —— 阶段 0~14（待打 tag 发布）
 
 首个版本：从 workspace 骨架到 QUIC 传输与挂载盘语义层的完整 IM 全栈。
 每个阶段的详细设计见对应文档。
@@ -82,3 +82,5 @@ workspace 管理（根 `Cargo.toml` 的 `[workspace.package]`，一处 bump 全 
   windows/macos 验证平台构建链）+ tls_demo/quic_demo 全链路自检
 - 版本与发布：CHANGELOG 立账；版本号由 workspace 统一管理（`version.workspace = true` 全 crate 继承）
 - 文档站：docs/ 经 mdBook 构建发布到 GitHub Pages（`docs/SUMMARY.md` + `pages.yml`）
+- 修复（CI 落地抓出的第一个真 bug）：并行集成测试共用默认 `machine_id`，雪花 ID
+  在同一毫秒撞库唯一约束（偶发失败、单跑必过）——脚手架统一发唯一 `machine_id`（docs/20 §4.8）
