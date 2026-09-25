@@ -12,9 +12,13 @@
 //!
 //! 学习文档：`docs/18-tls-e2ee.md`（阶段 12 编写）
 
+pub mod e2ee;
 pub mod error;
 pub mod tls;
 
+pub use e2ee::{
+    RatchetMessage, RatchetState, SessionKey, X3dhInitiation, initiate, respond,
+};
 pub use error::CryptoError;
 pub use tls::TlsMaterial;
 
