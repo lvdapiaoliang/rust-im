@@ -287,11 +287,13 @@ mod tests {
             let (tcp, _) = listener.accept().await.unwrap();
             let tls = acceptor.accept_stream(tcp).await.unwrap();
             let (server_tx, mut server_rx) = tokio::sync::mpsc::channel(16);
+            // ShutdownTx 必须活着：过早 drop 会静默触发关停（docs/20 §4.2 老坑）
+            let (_server_shutdown_tx, server_shutdown_rx) = shutdown_channel();
             let gateway = tokio::spawn(run_gateway_connection(
                 tls,
                 crate::gateway::GatewayConfig::default(),
                 server_tx,
-                shutdown_channel().1,
+                server_shutdown_rx,
             ));
             while server_rx.recv().await.is_some() {} // 排空入站（否则反压会阻塞读循环）
             gateway.await.unwrap().unwrap();
@@ -307,7 +309,9 @@ mod tests {
             ..crate::gateway::GatewayConfig::default()
         };
         let tls = connector.connect_stream(&addr.to_string(), "localhost").await.unwrap();
-        let client = tokio::spawn(run_gateway_connection(tls, config, inbound_tx, shutdown_channel().1));
+        // 同上：客户端的 ShutdownTx 也要活过整个测试
+        let (_client_shutdown_tx, client_shutdown_rx) = shutdown_channel();
+        let client = tokio::spawn(run_gateway_connection(tls, config, inbound_tx, client_shutdown_rx));
 
         // 客户端业务层应看到服务端回的 Pong（ack = seq+1）——
         // 心跳、网关、帧协议全部工作在 TLS 之上
