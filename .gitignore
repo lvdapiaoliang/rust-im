@@ -4,6 +4,10 @@
 # SDK 打包产物（cargo xtask sdk 随时可重建，不入库）
 /dist
 
+# 文档站构建产物（mdbook build 随时可重建，不入库；源在 docs/ + book.toml）
+/book
+
+
 # RustRover / IntelliJ 局部文件
 .idea/workspace.xml
 .idea/shelf/
