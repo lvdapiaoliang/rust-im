@@ -11,9 +11,9 @@
 //! 真实部署请用 im-server 主程序 + 数据库鉴权）。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use im_server::{SessionConfig, StaticToken};
-use im_transport::shutdown_channel;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -22,17 +22,16 @@ async fn main() -> anyhow::Result<()> {
         authenticator: Arc::new(StaticToken { token: "demo".to_owned() }),
         ..SessionConfig::default()
     };
-    let (addr, _sessions, _shutdown) = im_server::spawn_server(config).await?;
+    let (addr, _sessions, shutdown_tx) = im_server::spawn_server(config).await?;
     println!("im-sdk demo server listening on {addr}");
     println!("token = \"demo\"，任意 user_id 可登录；Ctrl-C 退出");
 
-    // 阻塞到 Ctrl-C（_shutdown 交给 ctrl-c 触发，与主程序同一套优雅关停）
-    let (shutdown_tx, shutdown_rx) = shutdown_channel();
-    tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
-        shutdown_tx.trigger();
-    });
-    let _ = shutdown_rx.is_triggered().await;
+    // Ctrl-C → 触发 spawn_server 返回的关停信号（accept/连接循环都订阅它）。
+    // 演示服务端不追求完整排干语义：给在途连接 300ms 收尾后退出。
+    let _ = tokio::signal::ctrl_c().await;
+    println!("shutdown signal received");
+    shutdown_tx.trigger();
+    tokio::time::sleep(Duration::from_millis(300)).await;
     println!("demo server stopped");
     Ok(())
 }
