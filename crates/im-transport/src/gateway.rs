@@ -45,6 +45,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use im_protocol::{Cmd, DEFAULT_MAX_FRAME_LEN, Frame};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
@@ -52,6 +53,26 @@ use tokio::time::{sleep, timeout};
 use crate::connection::{Connection, ReadHalf, WriteHalf};
 use crate::error::TransportError;
 use crate::shutdown::{ShutdownRx, shutdown_channel};
+
+/// 网关可承载的流：异步双工 + 可跨 task + 能报对端地址（阶段 12 泛型化）。
+///
+/// 有了它，网关从「只认 `TcpStream`」并级为「任何满足约束的流」——
+/// TLS 流（[`crate::tls`]）与未来的 QUIC 流都能直接进网关，
+/// 心跳/超时/优雅关闭等连接生命周期管理零改动复用。
+/// 这是类型系统层面的依赖倒置：网关依赖**抽象的流**，不依赖具体的 TCP。
+///
+/// `Send + 'static` 来自 `tokio::spawn` 的硬要求（task 可能活在任意线程）。
+pub trait GatewayStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {
+    /// 对端地址（日志与路由用）；socket 异常或非 IP 流时为 `None`。
+    fn peer_addr(&self) -> Option<SocketAddr>;
+}
+
+impl GatewayStream for TcpStream {
+    fn peer_addr(&self) -> Option<SocketAddr> {
+        // 同名固有方法（返回 io::Result）优先命中，这里是它到 Option 的收口
+        self.peer_addr().ok()
+    }
+}
 
 /// 出站帧通道容量。
 ///
@@ -193,8 +214,8 @@ pub struct InboundFrame {
 /// # Panics
 ///
 /// 网关 task panic 时（属实现 bug，应立即暴露）向上传播。
-pub async fn run_gateway_connection(
-    stream: TcpStream,
+pub async fn run_gateway_connection<S: GatewayStream>(
+    stream: S,
     config: GatewayConfig,
     inbound: mpsc::Sender<InboundFrame>,
     shutdown: ShutdownRx,
@@ -218,8 +239,8 @@ pub async fn run_gateway_connection(
 ///
 /// 返回的 `JoinHandle` 被上游 `await` 时，若网关 task panic 则向上传播 panic。
 #[must_use = "丢弃 JoinHandle 会丢掉连接的结束原因；句柄则可按需保留"]
-pub fn spawn_gateway(
-    stream: TcpStream,
+pub fn spawn_gateway<S: GatewayStream>(
+    stream: S,
     config: GatewayConfig,
     inbound: mpsc::Sender<InboundFrame>,
     shutdown: ShutdownRx,
@@ -235,15 +256,15 @@ pub fn spawn_gateway(
 
 /// 网关生命周期主体（由 [`spawn_gateway`] 启动）：
 /// 读循环 + 写 actor + 心跳 + 超时 + 优雅关闭。
-async fn gateway_lifecycle(
-    stream: TcpStream,
+async fn gateway_lifecycle<S: GatewayStream>(
+    stream: S,
     config: GatewayConfig,
     inbound: mpsc::Sender<InboundFrame>,
     outbound_rx: mpsc::Receiver<Frame>,
     handle: ConnectionHandle,
     shutdown: ShutdownRx,
 ) -> Result<(), TransportError> {
-    let peer = stream.peer_addr().ok();
+    let peer = stream.peer_addr();
 
     // 本连接内部的关停信号：读循环结束时触发，停掉心跳与写 actor。
     // 与外部 shutdown 的分工：外部 =「整个服务要停」，内部 =「这条连接要收尾」。
@@ -287,8 +308,8 @@ async fn gateway_lifecycle(
 }
 
 /// 写 actor：独占写半部，从通道收帧、编码写出，直到关停或通道关闭。
-fn spawn_writer(
-    mut writer: WriteHalf,
+fn spawn_writer<S: GatewayStream>(
+    mut writer: WriteHalf<tokio::io::WriteHalf<S>>,
     mut rx: mpsc::Receiver<Frame>,
     mut done: ShutdownRx,
 ) -> tokio::task::JoinHandle<Result<(), TransportError>> {
@@ -341,8 +362,8 @@ fn spawn_heartbeat(
 }
 
 /// 读循环：空闲超时、关停信号、帧分发三位一体的 `select!`。
-async fn read_loop(
-    mut reader: ReadHalf,
+async fn read_loop<S: GatewayStream>(
+    mut reader: ReadHalf<tokio::io::ReadHalf<S>>,
     inbound: mpsc::Sender<InboundFrame>,
     handle: ConnectionHandle,
     peer: Option<SocketAddr>,

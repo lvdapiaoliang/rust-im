@@ -1,0 +1,85 @@
+﻿
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:216:	/// Use [`Issuer::ne
+w`] instead if you want to obtain an [`Issuer`] that owns
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:217:	/// its parameters.
+> C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:218:	pub fn from_params(p
+arams: &'a CertificateParams, signing_key: S) -> Self {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:219:		Self {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:220:			distinguished_name
+: Cow::Borrowed(&params.distinguished_name),
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:221:			key_identifier_met
+hod: Cow::Borrowed(&params.key_identifier_method),
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:222:			key_usages: Cow::B
+orrowed(&params.key_usages),
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:223:			signing_key,
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:224:		}
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:225:	}
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:226:
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:227:	/// Parses an existi
+ng CA certificate from the ASCII PEM format.
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:228:	///
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:229:	/// See [`from_ca_ce
+rt_der`](Self::from_ca_cert_der) for more details.
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:230:	#[cfg(all(feature = 
+"pem", feature = "x509-parser"))]
+> C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:231:	pub fn from_ca_cert_
+pem(pem_str: &str, signing_key: S) -> Result<Self, Error> {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:232:		let certificate = p
+em::parse(pem_str).map_err(|_| Error::CouldNotParseCertificate)?;
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:233:		Self::from_ca_cert_
+der(&certificate.contents().into(), signing_key)
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:234:	}
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:235:
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:236:	/// Parses an existi
+ng CA certificate from the DER format.
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:237:	///
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:238:	/// This function as
+sumes the provided certificate is a CA. It will not check
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:239:	/// for the presence
+ of the `BasicConstraints` extension, or perform any other
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:240:	/// validation.
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:241:	///
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:243:	/// [`CertificateDer
+`] using the [`Into`] trait.
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:244:	#[cfg(feature = "x50
+9-parser")]
+> C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:245:	pub fn from_ca_cert_
+der(ca_cert: &CertificateDer<'_>, signing_key: S) -> Result<Self, Error> {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:246:		let (_remainder, x5
+09) = x509_parser::parse_x509_certificate(ca_cert)
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:247:			.map_err(|_| Error
+::CouldNotParseCertificate)?;
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:248:
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:249:		Ok(Self {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:250:			key_usages: Cow::O
+wned(KeyUsagePurpose::from_x509(&x509)?),
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:251:			key_identifier_met
+hod: Cow::Owned(KeyIdMethod::from_x509(&x509)?),
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:252:			distinguished_name
+: Cow::Owned(DistinguishedName::from_name(
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:253:				&x509.tbs_certifi
+cate.subject,
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:254:			)?),
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:255:			signing_key,
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:876:impl SerialNumber {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:877:	/// Create a serial 
+number from the given byte slice.
+> C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:878:	pub fn from_slice(by
+tes: &[u8]) -> SerialNumber {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:879:		let inner = bytes.t
+o_vec();
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:880:		SerialNumber { inne
+r }
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:881:	}
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:882:
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:883:	/// Return the byte 
+representation of the serial number.
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:884:	pub fn to_bytes(&sel
+f) -> Vec<u8> {
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:885:		self.inner.clone()
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:886:	}
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:887:
+  C:\Users\29775\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rcgen-0.14.7\src\lib.rs:888:	/// Return the lengt
+h of the serial number in bytes.
+
+

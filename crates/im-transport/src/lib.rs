@@ -6,10 +6,10 @@
 //! |------|------|------|
 //! | 0 | Tokio echo server / client：异步 TCP 编程热身（[`echo`]） | ✅ |
 //! | 2 | 帧连接 [`Connection`]、网关 [`run_gateway_connection`]：心跳、读空闲超时、优雅关闭 | ✅ |
-//! | 3 | 指数退避重连、seq/ACK 去重窗口（会话层） | 计划 |
+//! | 3 | 指数退避重连、seq/ACK 去重窗口（会话层） | ✅ |
 //! | 5 | 性能优化：`io_uring`、内核调优、`SO_REUSEPORT` 多进程 | 计划 |
-//! | 7 | rustls TLS | 计划 |
-//! | 8 | QUIC（quinn）备用传输路径，弱网对比测试 | 计划 |
+//! | 12 | rustls TLS（[`tls`]：材料在 im-crypto，装配在这里；网关泛型化支持任意 [`gateway::GatewayStream`]） | ✅ |
+//! | 13 | QUIC（quinn）备用传输路径，弱网对比测试 | 计划 |
 //!
 //! ## 快速上手（阶段 2 的标准姿势）
 //!
@@ -54,16 +54,18 @@ pub mod echo;
 pub mod error;
 pub mod gateway;
 pub mod shutdown;
+pub mod tls;
 
 pub use backoff::Backoff;
 pub use connection::{Connection, ReadHalf, WriteHalf};
 pub use dedup::{DedupWindow, Verdict, WINDOW_SIZE};
 pub use error::TransportError;
 pub use gateway::{
-    ConnectionHandle, DEFAULT_IDLE_TIMEOUT, GatewayConfig, HeartbeatPolicy, InboundFrame,
-    run_gateway_connection, spawn_gateway,
+    ConnectionHandle, DEFAULT_IDLE_TIMEOUT, GatewayConfig, GatewayStream, HeartbeatPolicy,
+    InboundFrame, run_gateway_connection, spawn_gateway,
 };
 pub use shutdown::{ShutdownRx, ShutdownTx, shutdown_channel};
+pub use tls::{ClientTlsStream, ServerTlsStream, TlsAcceptor, TlsConnector};
 
 pub use echo::{
     run_echo_client, run_echo_server, serve_connection, spawn_echo_server_on_random_port,

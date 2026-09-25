@@ -38,7 +38,9 @@ use crate::error::CryptoError;
 ///
 /// 惰性存储 DER（rustls 的原生格式，PEM 只在需要落盘/人工检查时转换），
 /// `server_config` / `client_config` 可重复调用——配置构造是纯函数。
-#[derive(Debug, Clone)]
+/// 不实现 `Clone`：私钥字段（`PrivateKeyDer`）不该被随手复制，
+/// 需要共享时外层包 `Arc`。
+#[derive(Debug)]
 pub struct TlsMaterial {
     /// CA 自签证书（客户端信任锚）。
     ca_cert_der: CertificateDer<'static>,
@@ -46,6 +48,11 @@ pub struct TlsMaterial {
     server_cert_der: CertificateDer<'static>,
     /// 服务端叶子私钥（PKCS#8 DER）。
     server_key_der: PrivateKeyDer<'static>,
+    /// CA 证书 PEM（rcgen 生成时顺手保留，供人工检查/落盘分发；
+    /// rustls 的 `PemObject` 只有解析方向，序列化方向不由它负责）。
+    ca_cert_pem: String,
+    /// 服务端叶子证书 PEM。
+    server_cert_pem: String,
 }
 
 impl TlsMaterial {
@@ -62,39 +69,40 @@ impl TlsMaterial {
     pub fn generate_demo() -> Result<Self, CryptoError> {
         // ── 1. CA：自签 + 无约束基本限制（真实 CA 会加 pathlen 约束）──
         let ca_key = rcgen::KeyPair::generate()?;
-        let mut ca_params =
-            rcgen::CertificateParams::new(vec!["rust-im demo CA".into()]).map_err(Box::new)?;
+        let mut ca_params = rcgen::CertificateParams::new(vec!["rust-im demo CA".into()])?;
         ca_params.distinguished_name.push(rcgen::DnType::CommonName, "rust-im demo CA");
         ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         let ca_cert = ca_params.self_signed(&ca_key)?;
 
         // ── 2. 服务端叶子：CA 签发，SAN 覆盖 localhost 与环回 IP ──
         let server_key = rcgen::KeyPair::generate()?;
-        let mut server_params = rcgen::CertificateParams::new(vec![
-            "localhost".into(),
-            "127.0.0.1".into(),
-        ])
-        .map_err(Box::new)?;
+        let mut server_params =
+            rcgen::CertificateParams::new(vec!["localhost".into(), "127.0.0.1".into()])?;
         server_params.distinguished_name.push(rcgen::DnType::CommonName, "localhost");
-        let server_cert = server_params.signed_by(&ca_cert, &ca_key)?;
+        // 签发者身份从 CA 参数借用（`Issuer` 借用 `ca_params`，
+        // 签名密钥是 CA 私钥）——叶子证书的颁发者字段由此而来
+        let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+        let server_cert = server_params.signed_by(&server_key, &issuer)?;
 
         Ok(Self {
-            ca_cert_der: CertificateDer::from(ca_cert.der()),
-            server_cert_der: CertificateDer::from(server_cert.der()),
+            ca_cert_der: ca_cert.der().clone(),
+            server_cert_der: server_cert.der().clone(),
             server_key_der: PrivateKeyDer::Pkcs8(server_key.serialized_der().to_vec().into()),
+            ca_cert_pem: ca_cert.pem(),
+            server_cert_pem: server_cert.pem(),
         })
     }
 
     /// CA 证书的 PEM（信任分发用：发给每个客户端的 `ca.pem`）。
     #[must_use]
-    pub fn ca_cert_pem(&self) -> String {
-        rustls::pki_types::pem::PemObject::to_pem(&self.ca_cert_der)
+    pub fn ca_cert_pem(&self) -> &str {
+        &self.ca_cert_pem
     }
 
     /// 服务端叶子证书的 PEM。
     #[must_use]
-    pub fn server_cert_pem(&self) -> String {
-        rustls::pki_types::pem::PemObject::to_pem(&self.server_cert_der)
+    pub fn server_cert_pem(&self) -> &str {
+        &self.server_cert_pem
     }
 
     /// 构造服务端配置：单证书 + 无客户端认证（mTLS 在 docs/18 §六 讨论）。
@@ -108,7 +116,7 @@ impl TlsMaterial {
     /// 证书/私钥不匹配或解析失败时返回 [`CryptoError::Rustls`]。
     pub fn server_config(&self) -> Result<ServerConfig, CryptoError> {
         ServerConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
-            .with_safe_defaults()
+            .with_safe_default_protocol_versions()?
             .with_no_client_auth()
             .with_single_cert(
                 vec![self.server_cert_der.clone()],
@@ -130,11 +138,10 @@ impl TlsMaterial {
         roots
             .add(self.ca_cert_der.clone())
             .map_err(|e| CryptoError::Rustls(rustls::Error::General(e.to_string())))?;
-        ClientConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
-            .with_safe_defaults()
+        Ok(ClientConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
+            .with_safe_default_protocol_versions()?
             .with_root_certificates(roots)
-            .with_no_client_auth()
-            .map_err(CryptoError::Rustls)
+            .with_no_client_auth())
     }
 }
 
