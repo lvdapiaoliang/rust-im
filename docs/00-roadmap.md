@@ -67,7 +67,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 9 | 群会议 + 屏幕共享（LiveKit SFU + docker-compose） | `web/` + `im-server/src/web` | 15 | ✅ 已完成 |
 | 10 | 压测与三级性能里程碑（M1 达成 99,969 连接；顺带修复接收窗楔死缺陷） | `im-bench` | 16 | ✅ 已完成 |
 | 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | ✅ 已完成 |
-| 12 | 桌面端（Tauri）+ E2EE（Signal） | `im-client` + `im-crypto` | 18 | 未开始 |
+| 12 | TLS 传输加密（rustls）+ E2EE（Signal 双棘轮）+ 类型状态原生 API（Tauri 壳诚实边界，见 docs/18 §五） | `im-crypto` + `im-transport` + `im-sdk::native` | 18 | ✅ 已完成 |
 | 13 | QUIC（quinn）+ 挂载盘（FUSE/WinFsp） | 扩展 | 19 | 未开始 |
 | 14 | 开源工程化：CI 矩阵 / 版本 / 文档站 | `.github` | — | 未开始 |
 
@@ -117,7 +117,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | .so / .dll / .dylib 产物 | 文档 17 | 阶段 11 + xtask 打包 |
 | 交叉编译 Android/iOS | 文档 17 | 阶段 11 xtask cross 任务 |
 | 字符串编码坑（UTF-8 / UTF-16 / char*） | 文档 17 | 阶段 11 |
-| Flutter/Electron/RN 集成 | 文档 18 | 阶段 12 Tauri 桌面端 |
+| Flutter/Electron/RN 集成 | 文档 18 | 阶段 12 `im-sdk::native` 类型状态 API（Tauri 桌面端边界） |
 
 ### 4.4 工程化与业务
 
@@ -183,7 +183,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 回调注册（回调即观察者的 C 形态） | SDK 跨语言事件推送 | 11 |
 | 错误码模型（Result 惯用法替代异常） | SDK 错误契约、`thiserror`/`anyhow` 分层 | 全程 |
 | NEWTYPE（Rust 特有） | `UserId(u64)`、`Seq(u64)`——零成本类型安全 | 全程 |
-| 类型状态（Typestate） | 编译期保证「未连接的句柄不能发消息」（连接状态进类型） | 11 进阶 |
+| 类型状态（Typestate） | `TypedSdkClient<Connected>`：编译期保证「未连接的句柄不能发消息」（docs/17 §七立账，阶段 12 兑现） | 12 |
 
 > Rust 的特别之处：一半的经典 GoF 模式（单例、工厂、命令）在 Rust 里被
 > **所有权、trait、泛型、NEWTYPE** 以更轻的方式覆盖了；同时 Rust 也有自己的
@@ -206,7 +206,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 15-meeting.md          （阶段 9）群会议与屏幕共享（LiveKit）
 16-perf.md             （阶段 10）性能压测与调优
 17-ffi.md              （阶段 11）FFI SDK
-18-e2ee.md             （阶段 12）端到端加密与桌面端
+18-tls-e2ee.md         （阶段 12）TLS 传输加密、端到端加密与类型状态原生 API
 19-quic-fuse.md        （阶段 13）QUIC 与挂载盘
 20-rust-pitfalls.md    全程：踩坑与填坑实录（真实事件 + Rust 业务常见错误速查）
 ```

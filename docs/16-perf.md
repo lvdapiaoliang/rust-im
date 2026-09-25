@@ -414,7 +414,8 @@ failed == 0——修复前这个测试必挂）。
   会话核心（10 万连接、静默楔死已修）包成跨语言可用的形态；
 - 类型状态（Typestate）进阶：编译期保证「未连接的句柄不能发消息」
   （实做后的诚实修正：C ABI 的 `void*` 到不了 C 调用方的类型系统，
-  ABI 形态做不了，留待阶段 12 以 Rust 原生 API 形态兑现，见 docs/17 §七）；
+  ABI 形态做不了，留待阶段 12 以 Rust 原生 API 形态兑现，见 docs/17 §七；
+  阶段 12 已兑现：`im-sdk::native::TypedSdkClient`，见 docs/18 §四）；
 - `im-sdk` crate 是 workspace 里第一个「给别的语言用」的 crate——
   所有权、Send/Sync 的边界（docs/02）在那里全部从理论变成约束。
 

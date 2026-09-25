@@ -15,7 +15,7 @@
 |---|---|---|
 | C / C++ / 任意能调动态库的语言 | C ABI（`extern "C"` + 不透明句柄） | `im_sdk.dll/.so/.dylib` + `im_sdk.h` |
 | Java / Kotlin（Android 预演） | JNI（feature `jni` 门控） | 同一个动态库 + `Sdk.java` |
-| Rust 宿主（阶段 12 Tauri） | 原生 rlib | `im-sdk` 直接依赖 |
+| Rust 宿主（Tauri 桌面端） | 原生 rlib | `im-sdk` 直接依赖（类型状态 API 见 docs/18 §四） |
 
 验证口径：`cargo test -p im-sdk` 12 项全绿 + JDK 27 真机冒烟
 （`Demo.java` 连真实 TCP 服务端收发消息，§六）。
@@ -199,7 +199,7 @@ access WARNING（未来版本会默认 block）——真实集成要加
 | **句柄/门面（Handle/Facade）** | `im_sdk_client_t` 不透明指针 + 7 个函数的极简 C API——调用方「拿到的东西」越小，误用面越小 |
 | **观察者（回调注册的 C 形态）** | 事件泵 + `EventCallback` typedef + `user_data` 闭包——观察者的跨语言形态就是「函数指针 + 上下文指针」 |
 | **错误码模型** | panic 边界拦在 FFI 内、`i32` 稳定码 + 兜底串——Result 惯用法翻译成 ABI 惯用法 |
-| **类型状态（Typestate）** | **本阶段未做**（诚实边界，见下） |
+| **类型状态（Typestate）** | 本阶段未做（诚实边界，见下）——阶段 12 已在 Rust 原生面兑现 |
 
 类型状态的账单：roadmap 4.5 标了「11 进阶」，docs/16 预告也提了
 「编译期保证未连接的句柄不能发消息」。实做时确认：**C ABI 形态下
@@ -207,7 +207,8 @@ access WARNING（未来版本会默认 block）——真实集成要加
 双 free 都在 C 的能力面内，Rust 编译期的类型区分到不了 C 那边。
 它在 Rust 原生 API（rlib 形态，`SdkClient<Connected>` 泛型状态）里
 可行，留给阶段 12 Tauri 集成时以 Rust API 形态实现——**模式是否
-适用由消费方的类型系统决定，不由实现方的意愿决定**。
+适用由消费方的类型系统决定，不由实现方的意愿决定**。（阶段 12
+已还账：`im-sdk::native` 的 `TypedSdkClient`，见 docs/18 §四。）
 
 ## 八、测试策略
 
@@ -239,13 +240,14 @@ JNI 层由真机冒烟覆盖，而不是靠 CI 里没有的 JDK）。
 - **无 cbindgen**：7 个函数手写头文件足够；API 膨胀后的迁移路径已
   在 §三写明。
 
-## 十、下一步（阶段 12 预告）
+## 十、下一步：阶段 12（已兑现，见 docs/18）
 
-SDK 阵面交付后回到安全与桌面主线：rustls TLS（传输层加密）→
-E2EE 双棘轮（X3DH + Signal 协议，`im-crypto`）→ Tauri 桌面端
-（消费本阶段的 rlib 形态，顺带兑现类型状态的 Rust 原生版）。
-docs/16 预告的「类型状态进阶」在此立账：**ABI 形态做不了，Rust
-原生 API 形态做**。
+SDK 阵面交付后回到安全与桌面主线，阶段 12 已按此预告落地：rustls
+TLS（`Connection` 泛型化 + `GatewayStream` 依赖倒置）、E2EE 双棘轮
+（X3DH + Signal 协议，`im-crypto`）、类型状态的 Rust 原生版
+（`im-sdk::native::TypedSdkClient`，错误码 6 追加
+`IM_SDK_ERR_REJECTED`）。Tauri 壳本身走诚实边界——成本账单与
+「如果搭」蓝图见 docs/18 §五。
 
 ## 十一、面试题与标准回答
 

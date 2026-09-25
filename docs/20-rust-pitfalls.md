@@ -126,6 +126,45 @@ unsafe attribute（它能把任意符号暴露给链接器，副作用不受隔�
 `export_name`/`link_section`。看到 `unsafe attribute` 字样的报错，
 照着加 `unsafe(...)` 包裹层即可，不是设计问题。
 
+### 2.8 rustls 0.23 默认 provider 是 aws-lc-rs：构建链失败面 + 进程全局边界【阶段 12】
+
+**现象**：按默认 feature 引 rustls，Windows 上会拉起 aws-lc-rs 的
+NASM/CMake 构建链——CI 与下游用户环境的失败面直接放大。
+
+**修复**：两层。依赖健康：`default-features = false` + `features =
+["ring", "std", "tls12", "log"]` 显式钉 ring（三大平台零外部构建
+工具）；工程边界：配置一律 `builder_with_provider(...)` 显式传入
+provider，**不调** `install_default_process_cryptography`——库不该
+替宿主做 provider 决策，进程全局默认只能有一个人说了算（宿主可能
+自己钉了别的 provider，覆盖是静默 bug）。
+
+**教训**：密码学库的「默认 provider」是构建链决策不是密码学决策；
+要发布给别人当依赖的库，任何进程全局状态都不要碰。
+
+### 2.9 `b""` 字节串字面量只收 ASCII：一段中文明文测试爆 52 个编译错误【阶段 12】
+
+`b"你好"` 直接编译错误——byte string literal 只允许 ASCII。含中文
+的测试明文一律写 `"你好".as_bytes()`：语义完全相同（字符串字面量
+本来就是 UTF-8 字节），字符集约束不同。
+
+**教训**：`b"..."` 与 `"...".as_bytes()` 不是风格差异，是**字符集
+差异**；看到一片 E0xxx 报错先检查是不是非 ASCII 混进了字节串。
+
+### 2.10 rcgen 0.14 签发 API 变形：`Issuer` 新类型 + `signed_by` 变参【阶段 12】
+
+**现象**：按 rcgen 0.12/0.13 的记忆写「证书对象调 `serialize_pem`」
+与「`signed_by(key, issuer_cert, issuer_key)` 三参」都不在——0.14
+把签发者身份收进 `Issuer::from_params(&ca_params, &ca_key)` 新类型，
+叶子签发变两参 `signed_by(&key, &issuer)`，PEM 序列化搬家到
+`cert.pem()`。
+
+**根因**：0.x 语义化版本允许 minor 内 breaking change（还没承诺
+稳定），证书库在大版本临近期频繁变形。
+
+**教训**：报「方法不存在/参数不匹配」且是三方库代码时，**先查该
+版本 changelog 再怀疑自己**；workspace 统一锁版本，让「文档记忆」
+与「实际版本」至少有一个是确定的。
+
 ---
 
 ## 三、async / Tokio 运行时
@@ -298,6 +337,27 @@ base64url 编码的 RFC 4648 向量也过——偏偏自家签发的 token 解�
   不能只看心跳；
 - **实测与理论差数量级时，拒绝采信"系统边界"结论**——两个判别实验
   （零丢包/零延迟）+ 数据形状比任何文档都诚实。完整排查过程见 docs/16 §5。
+
+### 4.6 双棘轮状态归属三连坑：按序全绿、乱序炸穿【阶段 12】
+
+**现象**：双棘轮单测第一轮 7 用例过 7（全按序）；补乱序用例后当场
+2 挂（GCM 认证失败）——三个独立的状态归属缺陷被按序路径全部掩盖。
+
+**三连根因**：
+1. `dh_ratchet_recv_side` 推进后**忘写回** `self.dh_remote`——后续
+   「对端是否又换了钥匙」的判断和旧链排空都依赖这个字段；
+2. `skip_to` 只在函数内部推进链密钥**局部副本**、不回写，decrypt
+   却用跳过前的旧 CK 派生本条消息的 MK——按序时 `from == until`
+   循环体不执行，bug 隐形；乱序（2,0,1 投递）当场炸穿。修正：
+   **按值收链、返回推进后的链**，调用方拿返回值派生；
+3. 发起方首次收到回信时 `dh_remote=Some(SPK)` 但 `chain_recv=None`，
+   「有旧远端公钥必有旧接收链」的 expect 前提不成立——旧链排空改
+   `if let (Some, Some)` 双守卫。
+
+**教训**：带内部状态的迭代助手，**要么自己管状态，要么把新状态
+还给调用方**，「原地假设」两头不靠；状态机缺陷对按序用例的遮蔽力
+超乎直觉——三个缺陷一个都抓不住，**乱序/交错用例是状态机的强制
+测试项**。详见 docs/18 §3.4。
 
 ---
 
@@ -487,6 +547,15 @@ Windows 的动态端口池**全局共享**——三跑数字 55,497/55,487/55,49
    路径不拦——错误延迟到运行时。多线程默认值：`Arc` + `Mutex`/原子量。
 8. **`clone` 不是免费动词**：`Arc::clone` 是引用计数（便宜），
    `String/Vec::clone` 是深拷贝（贵）。热路径 clone 前想清楚是哪种。
+9. **trait 方法同名歧义**：`new_from_slice` 在 `Mac` 与 `KeyInit`
+   两个 trait 上同名，`Hmac<Sha256>::new_from_slice(...)` 报
+   「多个适用项」——用全限定调用 `<Hmac<Sha256> as Mac>::new_from_slice`
+   把意图写死。多个 trait 定义同名方法时，裸调用等于把解析权交给
+   编译器去猜。
+10. **`Zeroize` 派生不认非 Zeroize 字段**：`RatchetState` 含
+    `HashMap`（不满足 `Zeroize`），`#[derive(ZeroizeOnDrop)]` 直接
+    拒——手动 `impl Drop` 逐字段 `zeroize()`。宁可显式三行，不为
+    派生换自定义容器；敏感结构的擦除路径要过目**每一个**字段。
 
 ### 7.3 错误处理的分层（本项目约定）
 
@@ -495,7 +564,7 @@ Windows 的动态端口池**全局共享**——三跑数字 55,497/55,487/55,49
 - **应用层**：`anyhow` + `.context("在做什么时失败")` ——给底层错误补上
   业务语境再上抛；
 - **FFI 边界（阶段 11 已落地）**：错误码模型，`Result` 不跨 C ABI——错误
-  在边界翻译成机器可读码（docs/17 §4.1），未知码兑底串保向前兼容。
+  在边界翻译成机器可读码（docs/17 §4.1），未知码兜底串保向前兼容。
 
 对照 Java：checked exception ≈ thiserror（类型化、强制处理），
 RuntimeException ≈ anyhow（带上下文的动态错误），但 Rust 把"抛"变成
@@ -523,5 +592,8 @@ RuntimeException ≈ anyhow（带上下文的动态错误），但 Rust 把"抛"
 
 ## 九、阶段 12~14 增补位
 
-后续阶段踩到的新坑按同格式追加到对应章节（E2EE 的密钥管理坑、
-QUIC 的迁移坑进对应节）。坑是项目最有生命力的文档——**宁可文档变厚，不可经验失传**。
+阶段 12 的坑已入账：rustls provider 构建链与进程全局边界（§2.8）、
+`b""` 非 ASCII（§2.9）、rcgen 0.14 签发 API 变形（§2.10）、双棘轮
+状态归属三连坑（§4.6）、Hmac trait 歧义与 Zeroize 擦除（§7.2 #9/#10）。
+后续阶段踩到的新坑按同格式追加（QUIC 的迁移坑进对应节）。坑是项目
+最有生命力的文档——**宁可文档变厚，不可经验失传**。
