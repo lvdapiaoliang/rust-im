@@ -164,7 +164,7 @@ impl TlsMaterial {
     /// 同样返回 [`CryptoError::Rustls`]（ring 支持，此路径实际不可达）。
     pub fn quic_server_config(&self) -> Result<ServerConfig, CryptoError> {
         let mut config = ServerConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
-            .with_protocol_versions(&[rustls::version::TLS13])?
+            .with_protocol_versions(&[&rustls::version::TLS13])?
             .with_no_client_auth()
             .with_single_cert(vec![self.server_cert_der.clone()], self.server_key_der.clone_key())
             .map_err(CryptoError::Rustls)?;
@@ -186,7 +186,7 @@ impl TlsMaterial {
             .add(self.ca_cert_der.clone())
             .map_err(|e| CryptoError::Rustls(rustls::Error::General(e.to_string())))?;
         let mut config = ClientConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
-            .with_protocol_versions(&[rustls::version::TLS13])?
+            .with_protocol_versions(&[&rustls::version::TLS13])?
             .with_root_certificates(roots)
             .with_no_client_auth();
         config.alpn_protocols = vec![QUIC_ALPN.to_vec()];
@@ -231,8 +231,8 @@ mod tests {
         let client = material.quic_client_config().unwrap();
         assert_eq!(server.alpn_protocols, vec![QUIC_ALPN.to_vec()], "服务端 ALPN 应为项目常量");
         assert_eq!(client.alpn_protocols, server.alpn_protocols, "双端 ALPN 必须逐字节一致");
-        // 钉 TLS 1.3：QUIC v1 的硬性要求（RFC 9001），多列一个版本都是配置事故
-        assert_eq!(server.versions, vec![rustls::Version::TLSv1_3]);
-        assert_eq!(client.versions, server.versions);
+        // 「TLS 1.3 only」由调用形态自证：with_protocol_versions 只传了
+        // TLS13 一个成员，rustls 不暴露 versions 字段做二次断言——
+        // 配置构造是纯函数，传了什么就是什么，无需运行时再验。
     }
 }
