@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         let _ = tokio::signal::ctrl_c().await;
         shutdown_tx.trigger();
     });
-    let _ = shutdown_rx.triggered().await;
+    let _ = shutdown_rx.is_triggered().await;
     println!("demo server stopped");
     Ok(())
 }

@@ -323,6 +323,10 @@ mod tests {
     }
 
     /// 拿到事件后安全地读字段（测试侧的「回调」就是它）。
+    ///
+    /// 测试代码读裸指针也过一遍 allow：生产代码零 unsafe 的分层承诺
+    /// 只针对 src 主干；测试里的指针检查是ffi 层契约的验收点。
+    #[allow(unsafe_code)]
     fn borrow(ev: &ImSdkEvent) -> (i32, Vec<u8>) {
         let data = if ev.data.is_null() {
             Vec::new()
