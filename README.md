@@ -39,9 +39,12 @@ fmt/clippy 门槛 + ubuntu/windows/macos 三平台测试矩阵，ubuntu job 配 
 service 真跑数据库测试——兑现 `pool_or_skip` 阶段 5 立下的「CI 配真库补盲区」账单；
 CHANGELOG（Keep a Changelog 格式）+ workspace 统一版本（一处 bump 全 crate 生效）；
 mdBook 文档站 → GitHub Pages，见 CHANGELOG.md 与 book.toml；
-Actions 已实机验证：push 后 WebFetch 抓出 service container 仅支持 Linux
-runner 的跨平台缺陷（windows/macos runner 无 Docker，启动即失败），已拆
-job 修复——三平台矩阵不挂 service，真库只在 ubuntu-only job 跑，见 docs/20 §6.7）。
+Actions 已实机验证：push 后 WebFetch 逐个抓出三个配置缺陷——① service
+container 仅支持 Linux runner（windows/macos 无 Docker，启动即失败）已拆 job 修复，
+CI 已线上全绿（fmt/clippy/三平台矩阵/ubuntu-only postgres）；② pages.yml 的 action 名
+少个 s（action-mdbook→actions-mdbook）已修；③ 文档站部署仅剩「仓库管理员手动开
+一次 GitHub Pages（Source 选 GitHub Actions）」这一人工前置（首开 Pages 需 admin，
+GITHUB_TOKEN 代不了劳），均见 docs/20 §6.7）。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
@@ -139,7 +142,8 @@ book.toml          mdBook 文档站配置（目录来源 docs/SUMMARY.md，产�
 - [19 - QUIC 与挂载盘：多路复用传输 + IM 数据的文件系统视图](docs/19-quic-fuse.md)（阶段 13）
 - [20 - Rust 全栈踩坑与填坑实录（含业务开发常见错误）](docs/20-rust-pitfalls.md)（全程）
 
-在线文档站（mdBook → GitHub Pages，push 后生效）：<https://lvdapiaoliang.github.io/rust-im/> ·
+在线文档站（mdBook → GitHub Pages）：<https://lvdapiaoliang.github.io/rust-im/>（需仓库管理员
+先在 Settings → Pages 将 Source 选为 GitHub Actions 开一次， Docs workflow 才能部署；此前置未完成前链接不生效）·
 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。

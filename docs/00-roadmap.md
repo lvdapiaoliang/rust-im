@@ -69,7 +69,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | ✅ 已完成 |
 | 12 | TLS 传输加密（rustls）+ E2EE（Signal 双棘轮）+ 类型状态原生 API（Tauri 壳诚实边界，见 docs/18 §五） | `im-crypto` + `im-transport` + `im-sdk::native` | 18 | ✅ 已完成 |
 | 13 | QUIC（quinn：多路复用/无队头阻塞，`GatewayStream` 利息兑现）+ 挂载盘语义层（im-mount：手写 LRU + 内存 FS + 目录缓存 + IM 视图映射，FUSE/WinFsp 驱动接线为诚实边界，见 docs/19 §4.6） | `im-transport::quic` + `im-mount` | 19 | ✅ 已完成 |
-| 14 | 开源工程化：CI 矩阵（fmt/clippy 门槛 + 三平台构建测试 + ubuntu-only PostgreSQL service 真跑 DB 测试）/ 版本（CHANGELOG + workspace 统一版本）/ 文档站（mdBook → GitHub Pages）；Actions 已实机验证：push 后 WebFetch 抓出 service container 跨平台缺陷（windows/macos runner 无 Docker）并拆 job 修复（docs/20 §6.7） | `.github` + `CHANGELOG.md` + `book.toml` | — | ✅ 已完成 |
+| 14 | 开源工程化：CI 矩阵（fmt/clippy 门槛 + 三平台构建测试 + ubuntu-only PostgreSQL service 真跑 DB 测试）/ 版本（CHANGELOG + workspace 统一版本）/ 文档站（mdBook → GitHub Pages）；Actions 已实机验证：push 后 WebFetch 逐个抓出三个配置缺陷（service container 仅 Linux runner、action 名少个 s、Pages 未开）；CI 已线上全绿，文档站仅剩「管理员手动开一次 Pages」人工前置（docs/20 §6.7） | `.github` + `CHANGELOG.md` + `book.toml` | — | ✅ 已完成 |
 
 > 阶段重排说明（阶段 5 收尾时定稿）：原阶段 5~9（压测 / FFI / 桌面+E2EE /
 > QUIC / 工程化）顺延为 10~14，为 Web 接入与社交功能（好友、群组、
