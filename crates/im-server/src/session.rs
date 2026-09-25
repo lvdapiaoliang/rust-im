@@ -518,7 +518,7 @@ impl SessionState {
 
     /// 窗口重同步：以到达帧的 seq 为新基准（供 `TooFar` 分支调用）。
     ///
-    /// 窗口未建时是静默 `no-op`——不可达的兜底（首帧必为 InOrder，
+    /// 窗口未建时是静默 `no-op`——不可达的兜底（首帧必为 `InOrder`，
     /// 不会 `TooFar`），懒初始化由随后的 [`SessionState::feed_seq`] 完成。
     pub(crate) fn resync(&mut self, seq: u64) {
         if let Some(window) = self.dedup.as_mut() {
