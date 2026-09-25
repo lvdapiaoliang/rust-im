@@ -106,8 +106,7 @@ pub trait MemberSource: Send + Sync {
 }
 
 /// [`MemberSource::list_members`] 的返回形态（装箱 future，trait 可作 `dyn`）。
-pub type MemberList<'a> =
-    Pin<Box<dyn Future<Output = Result<Vec<u64>, GroupError>> + Send + 'a>>;
+pub type MemberList<'a> = Pin<Box<dyn Future<Output = Result<Vec<u64>, GroupError>> + Send + 'a>>;
 
 // DB 实现：仓储的固有 async 方法摆进 trait（与 GroupRouter 的 hub 实现同一换法）。
 impl MemberSource for GroupStore {
@@ -595,7 +594,12 @@ mod tests {
         let sessions = Sessions::new(SessionConfig::default());
         let hub = GroupHub::with_source(Arc::new(MemSource(vec![101, 102, 103])), sessions.clone());
 
-        // 发送者 999 不是成员：delivered 口径就是成员数，账目干净
+        // 三名成员全部在线；发送者 999 不是成员：delivered 口径就是成员数
+        let mut rxs = Vec::new();
+        for (i, uid) in [101u64, 102, 103].into_iter().enumerate() {
+            rxs.push(online_member(&sessions, uid, i as u64 + 1));
+        }
+
         let msg = Msg {
             from: 999,
             to: 7,
@@ -605,8 +609,13 @@ mod tests {
         };
         assert!(hub.route(7, &msg).await, "内存源非空，应被扇出路径接管");
 
-        wait_stats(&hub, 7, "三成员送达", |s| s.delivered.load(Ordering::Relaxed) == 3)
-            .await;
+        wait_stats(&hub, 7, "三成员送达", |s| s.delivered.load(Ordering::Relaxed) == 3).await;
         assert_eq!(hub.actor_count(), 1, "内存源孵化了一个 actor");
+
+        for rx in &mut rxs {
+            let frame = timeout(WAIT, rx.recv()).await.expect("应收到扇出帧").expect("sink 存活");
+            let decoded = Msg::decode_frame(&frame).expect("载荷应与命令字匹配");
+            assert_eq!(decoded.to, 7, "载荷 to 保持群 ID");
+        }
     }
 }

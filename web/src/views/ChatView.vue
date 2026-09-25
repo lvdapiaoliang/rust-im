@@ -35,6 +35,7 @@ function logout(): void {
       <div class="avatar">{{ auth.user?.display_name?.charAt(0) ?? '?' }}</div>
       <div class="me-name">{{ auth.user?.display_name }}</div>
       <button class="nav" title="好友管理" @click="router.push({ name: 'friends' })">好友</button>
+      <button class="nav" title="群组管理" @click="router.push({ name: 'groups' })">群组</button>
       <button class="logout" title="登出" @click="logout">退出</button>
     </aside>
 

@@ -17,6 +17,14 @@ export interface MyGroup {
   role: 'owner' | 'member'
 }
 
+/** 群成员视图（GET /api/groups/{id}/members 的项）。 */
+export interface GroupMember {
+  id: string
+  username: string
+  display_name: string
+  role: 'owner' | 'member'
+}
+
 /** 会话列表项（好友或群的统一形态，聊天窗按它路由消息）。 */
 export interface Conversation {
   /** 消息收发目标 ID（好友用户 ID 或群 ID）。 */

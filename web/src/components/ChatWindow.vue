@@ -27,6 +27,12 @@ const activeName = computed(() => {
   return conv?.name ?? ''
 })
 
+/** 当前会话是否为群（群消息的 from 是不同成员，需要展示名字）。 */
+const isGroup = computed(() => {
+  const conv = chat.conversations.find((c) => c.id === chat.activeId)
+  return conv?.kind === 'group'
+})
+
 const messages = computed(() => chat.activeMessages)
 
 /** 贴底滚动（保留用户上翻的自由）。 */
@@ -45,7 +51,11 @@ watch(
 
 watch(
   () => chat.activeId,
-  () => void stickToBottom(),
+  () => {
+    // 进群会话顺手拉成员（缓存优先）：发送者名字的反查表
+    if (isGroup.value && chat.activeId !== null) void chat.loadMembers(chat.activeId)
+    void stickToBottom()
+  },
 )
 
 function send(): void {
@@ -87,6 +97,16 @@ async function onFileChosen(event: Event): Promise<void> {
 function isMine(from: string): boolean {
   return auth.user?.id === from
 }
+
+/** 群消息发送者显示名（自己的消息不用标——气泡位置已区分归属）。 */
+function senderName(from: string): string {
+  return chat.activeId === null ? '' : chat.memberName(chat.activeId, from)
+}
+
+/** 是否展示发送者名字：群会话且非本人。 */
+function showSender(from: string): boolean {
+  return isGroup.value && !isMine(from)
+}
 </script>
 
 <template>
@@ -106,7 +126,10 @@ function isMine(from: string): boolean {
         class="bubble-row"
         :class="{ mine: isMine(m.from) }"
       >
-        <MessageBubble :message="m" />
+        <div class="bubble-stack">
+          <div v-if="showSender(m.from)" class="sender-name">{{ senderName(m.from) }}</div>
+          <MessageBubble :message="m" />
+        </div>
       </div>
     </div>
 
@@ -169,6 +192,24 @@ function isMine(from: string): boolean {
 
 .bubble-row.mine {
   justify-content: flex-end;
+}
+
+.bubble-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+}
+
+.bubble-row.mine .bubble-stack {
+  align-items: flex-end;
+}
+
+.sender-name {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+  padding-left: 4px;
 }
 
 /* 气泡配色在 MessageBubble 基础上按归属重染 */

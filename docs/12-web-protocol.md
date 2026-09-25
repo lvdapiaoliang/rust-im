@@ -77,7 +77,8 @@ Authorization: Bearer <token>
 | GET /api/users?username=… | 按用户名精确查找（加好友入口，null = 没找到） | Bearer |
 | POST /api/groups | 建群（创建者为 owner） | Bearer |
 | GET /api/groups | 我的群 | Bearer |
-| POST /api/groups/{id}/members | 拉人入群（仅 owner） | Bearer |
+| POST /api/groups/{id}/members | 拉人入群（仅 owner；成功后扇出快照置脏，见 docs/13） | Bearer |
+| GET /api/groups/{id}/members | 成员视图列表（限群成员，阶段 7 前端群详情用） | Bearer |
 | POST /api/files | 上传（multipart，落盘 `data/files/`） | Bearer |
 | GET /api/files/{id} | 带鉴权下载 | Bearer |
 | GET /ws?token=… | 升级为 WebSocket | query 令牌（见四） |
@@ -224,6 +225,7 @@ ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
 | `bad_envelope` | 文本帧不是合法 JSON / 缺 type | 保持 |
 | `bad_payload` | 业务类型但载荷缺字段（如 msg 没有 to） | 保持 |
 | `not_friend` | 单聊收发双方不是好友（阶段 6 门槛，见 4.8） | 保持 |
+| `not_member` | 发送者不是群成员（阶段 7 群门槛；载荷同样带 client_msg_id 关联乐观消息） | 保持 |
 | `welcome.reason = "already online"` | 同账号已在线（注册失败） | 客户端见 reason 即断 |
 | HTTP 401 | 令牌无效/缺失 | 连接未建立 |
 
@@ -259,20 +261,23 @@ ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
   TCP 路径的 sink 没有实现（返回 `false`，连接不受影响）。
   能力即协议——不支持事件推送的传输不会收到它无法表达的信封。
 
-### 4.8 好友门槛：消息权限（阶段 6）
+### 4.8 发送门槛：消息权限（阶段 6 单聊 / 阶段 7 群聊）
 
-单聊不再是「知道对方 ID 就能发」：`to` 不是群时，收发双方必须是
-好友，服务端在 `dispatch_inbound` 里逐条校验（客户端伪造无效）：
+单聊不再是「知道对方 ID 就能发」：`to` 不是群时，收发双方必须是好友；
+`to` 是群时，发送者必须是群成员（阶段 7 `not_member`）。服务端在
+`dispatch_inbound` 里逐条校验（客户端伪造无效）：
 
 ```text
-msg 上行 → to 是群？ ─ 是 → 放行（群聊只要群存在）
+msg 上行 → to 是群？ ─ 是 → is_member(to, from)？ ─ 是 → 放行（扇出路径接管）
+                    │                        └ 否 → error(not_member) 连接不断
                     └ 否 → is_friend(from, to)？ ─ 是 → 放行
                                                 └ 否 → error(not_friend) 连接不断
 ```
 
 代价是每条消息两次主键点查（`is_group` / `is_friend`）——本地回环
-PG 上是微秒级；阶段 7 群 actor 与关系缓存上线后这条路径再优化
-（先正确后快，优化点集中且可测）。
+PG 上是微秒级。阶段 7 的偿还方式是**分层**而非缓存一处了事：门槛
+点查保留（快照是扇出的私产，不能当安全边界，见 docs/13 §4.6），
+扇出路径另走 actor 成员快照——先正确后快，两件事各自到位。
 
 ## 五、双传输对照：同一语义的两种皮肤
 
@@ -336,17 +341,19 @@ WS 集成测试用 `tokio-tungstenite` 做真客户端：不走 `FrameSink` 的
   拒绝）/ 连接中断（select 退出）。三种「失败」发生在三个层次，
   客户端要能分别感知——混为一谈的协议会让前端写出一堆猜谜代码。
 
-## 九、下一步（阶段 7 预告）
+## 九、下一步（阶段 8 预告）
 
-社交关系的「一对一」闭环已完成，剩下的另一半是「一对多」：
+> 本节原为阶段 7 预告，阶段 7 已完成，与实情的偏差校对如下：
+> 群扇出 actor / 慢消费者隔离 / 压测 / Vue 群聊界面均已落地
+> （详见 docs/13）；**未实现**：群内递增 seq、@提及、入群/退群
+> 通知（产品完整性欠账，见 docs/13 §七的账单）。
 
-- 群消息扇出：每群一个 actor（成员快照缓存，DB 变更失效），
-  群消息带群内递增 seq——`is_group`/`is_friend` 的每消息点查
-  将被成员快照替换，本阶段欠下的优化债在此偿还；
-- 慢消费者隔离：投递改 `try_send`，队列满按策略丢弃/断开
-  （决策记录进文档）——2 万人在线时不能让一个慢客户端拖垮整群；
-- 压测：im-bench 加群扇出场景（2 万连接、单群消息风暴），
-  量化数据进 docs/13；Vue 群聊界面（成员列表、@提到、入群/退群通知）。
+社交关系的「一对一」与「一对多」闭环都已完成，阶段 8 进入实时媒体：
+
+- 1对1 音视频 + 远程桌面（WebRTC P2P，WS 信令）；
+- 信令复用本文档的信封形态（新增 offer/answer/ICE 类型），
+  媒体流走 P2P——服务端只做信令中转的拓扑分工详见 docs/14；
+- Vue 通话 UI（呼叫/接听/挂断 + 屏幕捕获）。
 
 ## 十、面试题与标准回答
 
@@ -399,12 +406,13 @@ API **不允许自定义请求头**——这是平台限制，不是设计偏好
 
 **Q6：仅好友可发消息的校验放在服务端，每条消息两次点查会不会太贵？**
 
-答：现在是每条消息一次 `is_group` + 一次 `is_friend` 主键点查，
-本地回环 PG 上微秒级，人手速级的消息频率下完全无感。更重要的是
-**先正确后快**：权限校验必须在服务端（客户端校验只是装饰），
-且现阶段它是集中的一处（dispatch_inbound），可测可换。阶段 7
-群 actor 上线后换成内存成员快照 + 关系缓存，点查消失——优化点
-集中，替换才有边界。
+答：现在是每条消息一次 `is_group` + 一次关系点查（`is_friend` 或
+`is_member`），本地回环 PG 上微秒级，人手速级的消息频率下完全无感。
+更重要的是**先正确后快**：权限校验必须在服务端（客户端校验只是
+装饰），且它是集中的一处（dispatch_inbound），可测可换。阶段 7
+的实情：门槛点查**有意保留**（成员快照是扇出的私产，不能当安全
+边界，见 docs/13 §4.6），扇出路径另走 actor 快照——分层偿还，
+而非缓存一处了事。
 
 ---
 
@@ -416,3 +424,7 @@ WS 网关（JSON 信封 + 应用层心跳）、Vue 3 前端骨架（登录/会�
 好友门槛（not_friend 带关联 client_msg_id）、好友全流程事件推送、
 用户名查找、内容模型落地（前端判别联合渲染 + TUI 降级显示）、
 好友管理页/表情 picker/文件消息 UI；im-server 55 测试全绿。*
+
+*阶段 7 增补：群门槛 `not_member` + `GET /api/groups/{id}/members`
+端点（上表已列）；扇出架构与压测数据另见
+[docs/13-group-fanout.md](13-group-fanout.md)。*

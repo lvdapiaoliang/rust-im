@@ -21,6 +21,7 @@ import type {
   FileMeta,
   FriendEvent,
   FriendRequestView,
+  GroupMember,
   MessageBody,
   MyGroup,
   MsgPayload,
@@ -35,6 +36,8 @@ export const useChatStore = defineStore('chat', () => {
 
   const friends = ref<User[]>([])
   const groups = ref<MyGroup[]>([])
+  /** 群成员缓存：群 ID → 成员列表（进群会话时拉取，发送者名字反查用）。 */
+  const members = ref<Record<string, GroupMember[]>>({})
   /** 收到的好友请求（待处理）。 */
   const incomingRequests = ref<FriendRequestView[]>([])
   /** 会话消息：peerId（好友或群）→ 按时间升序的消息数组。 */
@@ -110,6 +113,42 @@ export const useChatStore = defineStore('chat', () => {
     await http.delete(`/api/friends/${userId}`)
     friends.value = friends.value.filter((u) => u.id !== userId)
     if (activeId.value === userId) activeId.value = null
+  }
+
+  // ── 群组管理（阶段 7）──
+  // 群消息收发不需要新 action：conversations/ingestIncoming/sendBody
+  // 的 to 原生兼容群 ID；这里只补管理动作与成员名字反查。
+
+  /** 建群：创建者即群主（后端响应不含 role，本地补齐）。 */
+  async function createGroup(name: string): Promise<MyGroup> {
+    const g = await http.post<{ id: string; name: string; owner_id: string }>('/api/groups', {
+      name,
+    })
+    const mine: MyGroup = { ...g, role: 'owner' }
+    if (!groups.value.some((x) => x.id === mine.id)) groups.value.push(mine)
+    return mine
+  }
+
+  /** 拉群成员（缓存优先——重复进会话不重拉）。 */
+  async function loadMembers(groupId: string): Promise<void> {
+    if (members.value[groupId] !== undefined) return
+    members.value[groupId] = await http.get<GroupMember[]>(`/api/groups/${groupId}/members`)
+  }
+
+  /** 拉人入群（仅群主；成功后失效重拉成员缓存）。 */
+  async function addGroupMember(groupId: string, userId: string): Promise<void> {
+    await http.post(`/api/groups/${groupId}/members`, { user_id: userId })
+    delete members.value[groupId]
+    await loadMembers(groupId)
+  }
+
+  /** 群内发送者显示名：成员缓存反查 → 好友表 → ID 尾号降级。 */
+  function memberName(groupId: string, userId: string): string {
+    const m = members.value[groupId]?.find((x) => x.id === userId)
+    if (m !== undefined) return m.display_name
+    const f = friends.value.find((u) => u.id === userId)
+    if (f !== undefined) return f.display_name
+    return `用户 ${userId.slice(-6)}`
   }
 
   /** 乐观插入 + 发出（所有发送形态共用：文本/表情/文件只是 content 不同）。 */
@@ -255,6 +294,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     friends,
     groups,
+    members,
     incomingRequests,
     conversations,
     messages,
@@ -267,6 +307,10 @@ export const useChatStore = defineStore('chat', () => {
     acceptRequest,
     rejectRequest,
     removeFriend,
+    createGroup,
+    loadMembers,
+    addGroupMember,
+    memberName,
     sendText,
     sendEmoji,
     sendFileMessage,

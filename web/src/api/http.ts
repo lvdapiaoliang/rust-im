@@ -39,7 +39,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const body = (await resp.json().catch(() => null)) as { error?: string } | null
     throw new ApiError(resp.status, body?.error ?? `请求失败（${resp.status}）`)
   }
-  return (await resp.json()) as T
+  // 空体容错：后端的动作型接口（接受/拒绝好友、拉人入群）返回 200 无 JSON，
+  // 无条件 resp.json() 会在空体上抛 SyntaxError——先读文本再选择性解析
+  const text = await resp.text()
+  return (text === '' ? undefined : JSON.parse(text)) as T
 }
 
 /** multipart 上传（字段名 file）。 */
