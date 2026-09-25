@@ -199,7 +199,10 @@ impl SdkClient {
         let event = if let Some(head) = self.pending.pop_front() {
             head
         } else {
-            // 参数名 timeout 遮蔽了 tokio::time::timeout——全限定调用消歧
+            // 参数名 timeout 遮蔽了 tokio::time::timeout——全限定调用消歧。
+            // 结果三层剥：外层 Result 是「超时与否」，内层 Option 是「通道关没关」：
+            //   Ok(Some(ev)) = 收到事件；Ok(None) = recv 完成但通道关闭；
+            //   Err(_Elapsed) = 超时。弄反这两层是 tokio::timeout 的经典坑。
             match self
                 .runtime
                 .block_on(async { tokio::time::timeout(timeout, events.recv()).await })
@@ -213,10 +216,10 @@ impl SdkClient {
                         .pop_front()
                         .expect("normalize 对非空输入至少产出一条")
                 }
-                // 超时：不是错误，是「暂时没有事件」
-                Ok(None) => return Ok(None),
-                // 通道关闭：状态机已落幕
-                Err(_) => return Err(error::ERR_STOPPED),
+                // recv 完成、拿到 None = 所有发送端已 drop：状态机已落幕
+                Ok(None) => return Err(error::ERR_STOPPED),
+                // Elapsed：不是错误，是「暂时没有事件」
+                Err(_) => return Ok(None),
             }
         };
         Ok(Some(alloc_event(event)))
@@ -477,6 +480,8 @@ mod tests {
         assert_eq!(borrow(&ev).0, EVENT_CONNECTED);
         assert!(ev.data.is_null());
         assert_eq!(ev.data_len, 0);
+        // 超时路径：没有新事件时返回 Ok(None)（而不是 Err——那层留给通道关闭）
+        assert!(client.poll_event(Duration::from_millis(50)).unwrap().is_none());
         client.destroy();
     }
 }
