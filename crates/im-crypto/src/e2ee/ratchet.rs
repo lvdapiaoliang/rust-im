@@ -310,6 +310,9 @@ impl RatchetState {
     /// 算出自己的新发送链（CKs）。
     fn dh_ratchet_recv_side(&mut self, remote: &PublicKey) {
         let old_secret = self.dh_self.take().expect("接收侧推进必有己方密钥对");
+        // 记住对端新公钥：decrypt 后续步骤与「对端是否又换了钥匙」的
+        // 判断都依赖它——忘了写回就是自己给自己埋 panic
+        self.dh_remote = Some(*remote);
         // 第一跳：对端的新发送链
         let dh_out = old_secret.diffie_hellman(remote);
         let (rk, ckr) = kdf_rk(&self.root_key, dh_out.as_bytes());
