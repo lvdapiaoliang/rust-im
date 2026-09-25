@@ -409,28 +409,7 @@ async fn run_reliability(cfg: ReliabilityCfg) -> Result<ReliabilityOutcome> {
         spawn_client(proxy.addr, 2, &cfg).await.context("启动 bob 客户端")?;
 
     // ── 等两端就位（握手帧本身要过弱网——丢包时靠客户端重连重试）──
-    let mut alice_ready = false;
-    let mut bob_ready = false;
-    let ready_deadline = Instant::now() + Duration::from_secs(20);
-    while !(alice_ready && bob_ready) {
-        if Instant::now() > ready_deadline {
-            anyhow::bail!("20s 内未完成双端握手（丢包 {permille}‰ 下重连应能成功）", permille = cfg.up.loss_permille);
-        }
-        tokio::select! {
-            ev = alice_events.recv() => match ev {
-                Some(ClientEvent::Connected { .. }) => alice_ready = true,
-                Some(ClientEvent::Disconnected) => {} // 重连中：继续等
-                Some(_) => {}
-                None => anyhow::bail!("alice 客户端意外退出"),
-            },
-            ev = bob_events.recv() => match ev {
-                Some(ClientEvent::Connected { .. }) => bob_ready = true,
-                Some(ClientEvent::Disconnected) => {}
-                Some(_) => {}
-                None => anyhow::bail!("bob 客户端意外退出"),
-            },
-        }
-    }
+    wait_both_ready(&mut alice_events, &mut bob_events, cfg.up.loss_permille).await?;
 
     // ── 发送：N 条背靠背入队（重发表自己管可靠性，场景只管数数）──
     let content = bytes::Bytes::from(vec![b'w'; cfg.payload_bytes]);

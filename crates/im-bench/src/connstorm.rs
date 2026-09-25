@@ -251,7 +251,7 @@ fn report(
     let fail_total: usize = failures.values().sum();
     if fail_total > 0 {
         println!("失败            : {fail_total} 次（按原因分类）：");
-        for (reason, count) in &failures {
+        for (reason, count) in failures {
             println!("  [{count:4}] {reason}");
         }
     } else {
