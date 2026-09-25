@@ -2,8 +2,9 @@
 #
 # 触发：master 上 docs/、book.toml 或本文件有改动时（文档没动不重发，
 # 省 runner 时间）；也支持手动触发（Actions 页面 Run workflow）。
-# 预置条件：仓库 Settings → Pages 的 Source 选「GitHub Actions」（部署
-# 用 actions/deploy-pages 官方管线，不用老式 branch 部署）。
+# 预置条件：仓库 Settings → Pages 的 Source 选「GitHub Actions」。首跑若
+# Pages 尚未开启，configure-pages 会报 Get Pages site failed（Not Found）——
+# 下面用 enablement: true 让它凭 pages:write 权限自动开启（无需手动进 Settings）。
 name: Docs
 
 on:
@@ -37,6 +38,10 @@ jobs:
           mdbook-version: "0.4.40"
       - run: mdbook build
       - uses: actions/configure-pages@v5
+        with:
+          # 首跑自动开启 Pages（Source=GitHub Actions）：靠上面的 pages:write
+          # 权限，免去人工进 Settings 开启（否则报 Get Pages site failed）
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: book
