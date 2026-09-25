@@ -70,7 +70,7 @@ pub struct IdentityKeyPair {
 }
 
 /// 身份公钥（可自由传播）：Ed25519 验证钥 + X25519 公钥。
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdentityPublicKey {
     verifying: VerifyingKey,
     dh: PublicKey,
@@ -142,7 +142,8 @@ impl OneTimePreKey {
     #[must_use]
     pub fn generate(key_id: u32, rng: &mut (impl CryptoRng + RngCore)) -> Self {
         let secret = StaticSecret::random_from_rng(rng);
-        Self { key_id, secret, public: PublicKey::from(&secret) }
+        let public = PublicKey::from(&secret);
+        Self { key_id, secret, public }
     }
 }
 
@@ -193,7 +194,7 @@ impl SessionKey {
 /// Bob 拿着它 + 自己的私钥算出与 Alice 相同的 SK。
 /// 手写紧凑编码：X25519 公钥 32B + key_id 4B，与 im-protocol 的
 /// 手写字节布局同一风格（E2EE 载荷走 IM 帧 payload，能省一字节是一字节）。
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct X3dhInitiation {
     /// Alice 的身份公钥（Bob 侧 TOFU 记住她）。
     pub initiator_identity: IdentityPublicKey,
