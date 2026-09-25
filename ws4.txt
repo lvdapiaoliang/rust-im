@@ -1,8 +1,0 @@
-﻿cargo :     Checking im-bench v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-bench)
-所在位置 行:1 字符: 5
-+ & { cargo check --workspace --all-targets 2>&1 | Out-File -Encoding u ...
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (    Checking im...rates\im-bench):String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.70s

@@ -1,9 +1,0 @@
-﻿
-docs\00-roadmap.md:34:├── im-transport/  传输层：Tokio TCP 长连接、心跳、重连、TLS、（后期 QUIC）
-docs\00-roadmap.md:35:├── im-crypto/     加密层：TLS 材料、E2EE Signal 双棘轮、密钥存储
-docs\00-roadmap.md:60:| 2 | 传输层：心跳 / 重连 / seq-ACK / 优雅关闭（TLS 移至阶段 12 前置实现） | `im-transport` | 05 
-| ? 已完成 |
-docs\00-roadmap.md:108:| TLS/mTLS 握手 | 文档 18 | 阶段 12 前置实现的 rustls |
-docs\00-roadmap.md:175:| 装饰器（Decorator） | `TcpStream` → TLS 流 → 帧流的层层包装（零成本抽象的典型） | 2 |
-
-
