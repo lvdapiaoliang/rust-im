@@ -449,9 +449,8 @@ mod tests {
         })
         .await
         .expect("服务应能启动");
-        let stream =
-            connect_bound(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), addr)
-                .expect("绑定回环连接");
+        let stream = connect_bound(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), addr)
+            .expect("绑定回环连接");
         let mut conn = Connection::new(stream);
         handshake(&mut conn, 7, "any", Duration::from_secs(2))
             .await
@@ -482,9 +481,8 @@ mod tests {
         })
         .await
         .expect("服务应能启动");
-        let stream =
-            connect_bound(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), addr)
-                .expect("连接应成功");
+        let stream = connect_bound(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), addr)
+            .expect("连接应成功");
         let mut conn = Connection::new(stream);
         let err = handshake(&mut conn, 7, "wrong", Duration::from_secs(2))
             .await
