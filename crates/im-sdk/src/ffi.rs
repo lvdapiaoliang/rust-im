@@ -328,10 +328,16 @@ mod tests {
 
     /// 回调模式端到端（C 形态的回调 + user_data 裸指针过 Send 包装）：
     /// 泵线程把 Connected/Message 送达回调，事件作用域契约由拷贝履行。
-    #[tokio::test]
-    async fn callback_pump_delivers_events_end_to_end() {
-        let (addr, _sessions, _shutdown) =
-            im_server::spawn_server(SessionConfig::default()).await.unwrap();
+    ///
+    /// 普通 #[test]：SDK 同步入口内部 block_on，不能在 tokio 上下文里调
+    /// （与 core.rs 测试同一套口径，详见那边的 TestServer 注释）。
+    #[test]
+    fn callback_pump_delivers_events_end_to_end() {
+        // 服务端挂在独立 runtime 上（drop 即停）
+        let rt = tokio::runtime::Runtime::new().expect("测试服务端运行时");
+        let (addr, _sessions, _shutdown) = rt
+            .block_on(async { im_server::spawn_server(SessionConfig::default()).await })
+            .expect("测试服务端应能启动");
         let addr = CString::new(addr.to_string()).unwrap();
         let token = CString::new("t").unwrap();
 
