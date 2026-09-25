@@ -17,7 +17,9 @@
 //!   服务端全套（网关 task + 会话 task + 双向通道），报告按"每连接总成本"
 //!   口径陈述——比单侧口径保守，不美化；
 //! - 服务端 60s 读空闲断连（[`im_transport::DEFAULT_IDLE_TIMEOUT`]）：
-//!   客户端不发心跳，`--hold-secs` 上限 45s（两侧都尊重对方的纪律）；
+//!   压测连接由 20s 一次的 Ping 扫掠保活（10 万目标的建连相本身就
+//!   超过 60s，“客户端不发心跳”的旧假设只在 1 万规模成立），
+//!   `--hold-secs` 上限仍 45s（扫掠不豁免拆除验证的纪律）；
 //! - Windows/Linux 的临时端口池约 1.6 万：单源 IP 连不满 10 万，
 //!   `--source-ips` 在 127/8 回环段轮换源地址（127.x.x.x 整段都是回环）。
 //!
@@ -30,8 +32,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use clap::Args;
-use im_protocol::{Handshake, HandshakeAck, Payload};
+use im_protocol::{Cmd, Frame, Handshake, HandshakeAck, Payload};
 use im_server::{SessionConfig, StaticToken};
 use im_transport::Connection;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -39,6 +42,9 @@ use tokio::net::TcpStream;
 use tokio::task::JoinSet;
 
 use crate::memstats;
+
+/// 保活扫掠间隔：明显小于服务端 60s 读空闲纪律的两留量。
+const SWEEP_INTERVAL: Duration = Duration::from_secs(20);
 
 /// 连接风暴参数。
 #[derive(Debug, Args)]
@@ -143,10 +149,15 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
     let online = sessions.online_count();
     anyhow::ensure!(online == held.len(), "计数对不上：路由表 {online} vs 保活连接 {}", held.len());
 
-    // ── 稳态：hold 秒内每秒采样内存与在线数 ──
+    // ── 稳态：hold 秒内每秒采样内存与在线数（扫掠保活，理由见 run_storm）──
     let mut hold_samples = Vec::new();
+    let mut last_sweep = Instant::now();
     for s in 0..hold_secs {
         tokio::time::sleep(Duration::from_secs(1)).await;
+        if last_sweep.elapsed() >= SWEEP_INTERVAL {
+            keepalive_sweep(&mut held).await;
+            last_sweep = Instant::now();
+        }
         if let Some(snap) = memstats::snapshot() {
             hold_samples.push((s + 1, snap.working_set));
         }
@@ -199,6 +210,7 @@ async fn run_storm(
     let mut connect_ns: u128 = 0;
     let mut handshake_ns: u128 = 0;
     let mut failures: HashMap<String, usize> = HashMap::new();
+    let mut last_sweep = Instant::now();
 
     for chunk in (0..args.connections).collect::<Vec<_>>().chunks(args.wave) {
         // 建连相：阻塞池并行 connect（源 IP 轮换）
@@ -239,8 +251,28 @@ async fn run_storm(
             }
         }
         handshake_ns += t0.elapsed().as_nanos();
+
+        // 保活扫掠：目标 10 万时建连相本身超过服务端 60s 读空闲纪律，
+        // 每隔 SWEEP_INTERVAL 给全部保活连接写一帧 Ping 重置服务端计时器
+        // （真实客户端的心跳在压测里的形状）。写失败静默忽略——
+        // 已死的连接逃不过风暴后的守恒校验。
+        if last_sweep.elapsed() >= SWEEP_INTERVAL {
+            keepalive_sweep(&mut held).await;
+            last_sweep = Instant::now();
+        }
     }
     (held, connect_ns, handshake_ns, failures)
+}
+
+/// 保活扫掠：给全部保活连接写一帧 `Ping`。
+///
+/// 服务端“吞 Ping 回 Pong”，且心跳不参与 seq 去重（seq 0 即可）；
+/// 回出的 Pong 落在无人读的接收缓冲里（每次扫掠几十字节，可忽略）。
+async fn keepalive_sweep(held: &mut [Connection]) {
+    let ping = Frame::new(Cmd::Ping, 0, 0, Bytes::new());
+    for conn in held {
+        let _ = conn.write_frame(&ping).await;
+    }
 }
 
 /// 报告输出（含守恒与内存账本）。
