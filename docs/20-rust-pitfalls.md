@@ -757,12 +757,16 @@ RuntimeException ≈ anyhow（带上下文的动态错误），但 Rust 把"抛"
 阶段 14 的坑已入账：幻影错误第二次实遇（§2.1 补笔——quic_demo
 E0599，同款根因不同 crate）、PowerShell 5.1 按 ANSI 读 UTF-8 无 BOM
 脚本（§6.6）、并行集成测试共用默认 `machine_id` 撞雪花 ID（§4.8——
-CI 落地抓出的第一个真 bug）、GitHub service container 只支持 Linux
-runner（§6.7——三平台矩阵挂 postgres service 让 windows/macos 腿直接
-失败，push 后 WebFetch Actions 页面抓出，已拆 job 修复）。CI/文档站的
-YAML 本地校验（js-yaml）、mdbook build 本地全绿只能证明配置合法，证明
-不了 runner 平台能力——Actions 已实机验证：§6.7 的跨平台缺陷就是这么
-抓出来并修掉的（与 §6.4 同一纪律：未实机验证项 push 后必须回看）。
+CI 落地抓出的第一个真 bug）、GitHub Actions 实机验证抓出的两个配置
+缺陷（§6.7——① service container 只支持 Linux runner，三平台矩阵挂
+postgres service 让 windows/macos 腿启动即失败，已拆 job 修复；② pages.yml
+的 action 名写成 `peaceiris/action-mdbook` 少个 s，报 repository not found，
+已改 `actions-mdbook`）。CI/文档站的 YAML 本地校验（js-yaml）、mdbook
+build 本地全绿只能证明配置合法，证明不了 runner 平台能力与第三方
+action 名——两个缺陷都是 push 后 WebFetch Actions 页面抓出来并修掉的：
+CI（fmt/clippy/三平台矩阵/ubuntu-only postgres）已线上转绿（4m55s），
+Docs 的 action 名修复已推送待复跑确认（与 §6.4 同一纪律：未实机验证
+项 push 后必须回看）。
 
 后续阶段踩到的新坑按同格式追加（阶段 14 工程化的坑进对应节）。坑是
 项目最有生命力的文档——**宁可文档变厚，不可经验失传**。

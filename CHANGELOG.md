@@ -86,4 +86,6 @@ workspace 管理（根 `Cargo.toml` 的 `[workspace.package]`，一处 bump 全 
   在同一毫秒撞库唯一约束（偶发失败、单跑必过）——脚手架统一发唯一 `machine_id`（docs/20 §4.8）
 - 修复（Actions 实机验证抓出）：service container 仅支持 Linux runner，postgres service
   放在三平台矩阵 job 级别会让 windows/macos 腿启动即失败——拆为三平台矩阵（无 service）
-  + ubuntu-only 真库 job（docs/20 §6.7）
+  + ubuntu-only 真库 job（docs/20 §6.7）；拆后 CI 已线上全绿（fmt/clippy/三平台矩阵/postgres）
+- 修复（Actions 实机验证抓出）：pages.yml 引用不存在的 `peaceiris/action-mdbook`（少个 s，
+  报 repository not found），已改 `peaceiris/actions-mdbook`（docs/20 §6.7）
