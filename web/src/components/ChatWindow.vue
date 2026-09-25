@@ -4,10 +4,12 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
+import { useCallStore } from '@/stores/call'
 import MessageBubble from '@/components/MessageBubble.vue'
 
 const auth = useAuthStore()
 const chat = useChatStore()
+const call = useCallStore()
 
 const draft = ref('')
 const scrollBox = ref<HTMLElement | null>(null)
@@ -107,12 +109,23 @@ function senderName(from: string): string {
 function showSender(from: string): boolean {
   return isGroup.value && !isMine(from)
 }
+
+/** 发起通话（仅好友会话：1对1 的门槛与服务端信令校验一致）。 */
+function callPeer(kind: 'audio-video' | 'screen'): void {
+  if (chat.activeId === null || isGroup.value) return
+  void call.startCall(chat.activeId, kind)
+}
 </script>
 
 <template>
   <section class="chat-window">
     <header v-if="chat.activeId !== null" class="window-header">
-      {{ activeName }}
+      <span class="title">{{ activeName }}</span>
+      <!-- 通话入口：仅好友单聊（群通话是阶段 9 的 SFU 形态，不走 P2P） -->
+      <span v-if="!isGroup" class="call-tools">
+        <button class="tool" title="视频通话" @click="callPeer('audio-video')">📞</button>
+        <button class="tool" title="共享屏幕给对方" @click="callPeer('screen')">🖥</button>
+      </span>
     </header>
 
     <div v-if="chat.activeId === null" class="placeholder">
@@ -170,6 +183,19 @@ function showSender(from: string): boolean {
   padding: 14px 20px;
   font-weight: 600;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.window-header .title {
+  flex: 1;
+  min-width: 0;
+}
+
+.call-tools {
+  display: flex;
+  gap: 4px;
 }
 
 .placeholder {

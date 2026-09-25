@@ -160,7 +160,8 @@ GET /ws?token=<登录令牌>
 | `ping` | 上行 | `{}` | 应用层心跳（浏览器发不了 WS 控制帧） |
 | `pong` | 下行 | `{}`（`seq` 回显 ping 的 seq） | 心跳应答，前端按 seq 配对 |
 | `error` | 下行 | `{code, message, client_msg_id?}` | 协议错误，**连接不断**（client_msg_id 仅在消息被拒时携带，见 4.6） |
-| `event` | 下行 | `{kind, …}` | 服务端主动事件（好友请求/被接受/被删除等，见 4.7） |
+| `signal` | 上行 | `{to, signal}` | WebRTC 信令中转（阶段 8）：仅好友、不透明转发、离线报错，详见 4.9 |
+| `event` | 下行 | `{kind, …}` | 服务端主动事件（好友请求/被接受/被删除等，见 4.7；**信令下行复用此信封**，`kind = "signal"`） |
 
 ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
 在信封里同样**一律字符串**；入站宽容接受数字。
@@ -226,6 +227,7 @@ ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
 | `bad_payload` | 业务类型但载荷缺字段（如 msg 没有 to） | 保持 |
 | `not_friend` | 单聊收发双方不是好友（阶段 6 门槛，见 4.8） | 保持 |
 | `not_member` | 发送者不是群成员（阶段 7 群门槛；载荷同样带 client_msg_id 关联乐观消息） | 保持 |
+| `peer_offline` | 信令收件人离线（阶段 8；**不进离线队列**——过期信令补投有害，见 4.9） | 保持 |
 | `welcome.reason = "already online"` | 同账号已在线（注册失败） | 客户端见 reason 即断 |
 | HTTP 401 | 令牌无效/缺失 | 连接未建立 |
 
@@ -248,6 +250,7 @@ ID 字段（`to`/`from`/`msg_id`/`client_msg_id`/`session_id`/`since`）
 | `friend_request` | 发起好友请求 | `{request: FriendRequestView}` | 接收方 |
 | `friend_accepted` | 接受请求 | `{user, by}` | 发起方（接受方自己刚点的按钮，不需要） |
 | `friend_removed` | 删除好友 | `{user}` | 被删方 |
+| `signal` | 收到 `signal` 上行（WS，阶段 8） | `{from, signal}` | 信令收件人（原样转发，`from` 服务端裁决） |
 
 三个工程决策值得展开：
 
@@ -278,6 +281,24 @@ msg 上行 → to 是群？ ─ 是 → is_member(to, from)？ ─ 是 → 放�
 PG 上是微秒级。阶段 7 的偿还方式是**分层**而非缓存一处了事：门槛
 点查保留（快照是扇出的私产，不能当安全边界，见 docs/13 §4.6），
 扇出路径另走 actor 成员快照——先正确后快，两件事各自到位。
+
+### 4.9 信令中转：signal 信封（阶段 8）
+
+实时媒体（音视频/远程桌面）的**协商**走这条通道，媒体流本身走
+WebRTC P2P 直连（一比特不进服务器）。上行一条信封、下行复用
+`event`（`kind = "signal"`），服务端语义总共三句话：
+
+1. **仅好友**（`is_friend` 门槛，与消息同一纪律——通话权限不比
+   消息宽松）；
+2. **不透明转发**（`signal` 字段是任意 JSON，offer/answer/candidate/
+   hangup/reject 全塞在里面，前端 `call` 标签判别——信令演进零
+   服务端改动，与 content 同一不透明语义）；
+3. **收件人离线回 `peer_offline`**（即时反馈给呼叫方，不补投——
+   ICE 候选五秒后就过期，可靠性由用户重拨保障）。
+
+信令刻意**不是消息**：不分配 `msg_id`、不 ack、不进离线队列——
+与事件同通道（`push_event` 直达）。拓扑分工与完整设计见
+[docs/14](14-webrtc.md)。
 
 ## 五、双传输对照：同一语义的两种皮肤
 
@@ -320,6 +341,7 @@ SyncReq）下行时返回 `None`（WS 路径不发这种帧，`FrameSink::send`
 |---|---|---|
 | 翻译层单元测试 | msg 信封往返 / content 序列化 / ID 宽容解析 / 未知类型拒绝 / 传输层帧不出站 | 6 |
 | WS 集成（真 HTTP + 真 WS + 真 PG） | 坏令牌升级前 401 / welcome+msg 往返 / 单端登录拒绝 / 断线重连离线补投 / 坏信封存活 / **非好友拒发不断连** / **事件推送直达** 等 | 8 |
+| WS 集成（阶段 8） | 信令转发主线 / 非好友 `not_friend` / 离线 `peer_offline` 且不进离线队列 | 3 |
 | REST 集成（真 PG） | 注册登录 / 好友全流程 / 群组 / 文件上传下载（multipart 边界）/ 用户名查找 | 10 |
 | 会话核心 | `push_event` 三态：文本直达 / TCP 不支持 / 离线放弃 | 1 |
 | TUI 降级 | 纯文本原样 / 无 kind JSON 原样 / text 提取 / emoji 直显 / file/image 降级占位 | 1 |
@@ -341,19 +363,25 @@ WS 集成测试用 `tokio-tungstenite` 做真客户端：不走 `FrameSink` 的
   拒绝）/ 连接中断（select 退出）。三种「失败」发生在三个层次，
   客户端要能分别感知——混为一谈的协议会让前端写出一堆猜谜代码。
 
-## 九、下一步（阶段 8 预告）
+## 九、下一步（阶段 9 预告）
 
-> 本节原为阶段 7 预告，阶段 7 已完成，与实情的偏差校对如下：
+> 本节原为阶段 7 预告，阶段 7、8 均已完成，与实情的偏差校对如下：
 > 群扇出 actor / 慢消费者隔离 / 压测 / Vue 群聊界面均已落地
 > （详见 docs/13）；**未实现**：群内递增 seq、@提及、入群/退群
-> 通知（产品完整性欠账，见 docs/13 §七的账单）。
+> 通知（产品完整性欠账，见 docs/13 §七的账单）。阶段 8 预告说
+> 「信令新增 offer/answer/ICE 类型」——实情更省：**只加了一个
+> `signal` 上行类型**（载荷 `call` 标签判别，offer/answer/candidate/
+> hangup/reject 全在不透明的 signal 字段里），下行复用 `event`
+> 信封。不透明语义又一次把协议演进成本压到了最小（见 4.9 与
+> docs/14）。
 
-社交关系的「一对一」与「一对多」闭环都已完成，阶段 8 进入实时媒体：
+文本与 1对1 实时媒体都闭环了，阶段 9 处理「一对多」的媒体——
+P2P 全连接（N×(N-1)/2 条管道）在 8 人会议就会把上行带宽打爆：
 
-- 1对1 音视频 + 远程桌面（WebRTC P2P，WS 信令）；
-- 信令复用本文档的信封形态（新增 offer/answer/ICE 类型），
-  媒体流走 P2P——服务端只做信令中转的拓扑分工详见 docs/14；
-- Vue 通话 UI（呼叫/接听/挂断 + 屏幕捕获）。
+- 群会议 + 屏幕共享（LiveKit SFU：每人只上传一路，服务器选择性
+  转发；信令/鉴权/UI 复用已有骨架，服务器侧只加 token 签发端点）；
+- docker-compose 起 LiveKit（本机无 Docker 的环境限制会诚实记录）；
+- 屏幕共享从「通话的特殊形态」回归为「会议的一个普通 track」。
 
 ## 十、面试题与标准回答
 
@@ -428,3 +456,7 @@ WS 网关（JSON 信封 + 应用层心跳）、Vue 3 前端骨架（登录/会�
 *阶段 7 增补：群门槛 `not_member` + `GET /api/groups/{id}/members`
 端点（上表已列）；扇出架构与压测数据另见
 [docs/13-group-fanout.md](13-group-fanout.md)。*
+
+*阶段 8 增补：`signal` 上行信封 + `peer_offline` 错误码 + `signal`
+事件（4.3 / 4.6 / 4.7 / 4.9 已更新）；拓扑分工（信令走 WS、媒体走
+P2P）与前端状态机详见 [docs/14-webrtc.md](14-webrtc.md)。*

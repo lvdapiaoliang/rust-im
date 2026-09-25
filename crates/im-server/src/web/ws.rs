@@ -67,6 +67,9 @@ mod envelope_type {
     pub const PONG: &str = "pong";
     /// 下行：协议错误（坏信封/未知类型），连接不断。
     pub const ERROR: &str = "error";
+    /// 上行：WebRTC 信令中转（阶段 8）——offer/answer/ICE/挂断等，
+    /// 转发给 `to`（下行复用 `event` 信封，`kind = "signal"`）。
+    pub const SIGNAL: &str = "signal";
     // 注：`event`（服务端主动事件，阶段 6）不在此列——它不是翻译层
     // 的产物，而是 REST 层经 `Sessions::push_event` 直通的已组装信封
     // （见 session.rs；payload 自带 `kind` 子类型，新事件零协议改动）。
@@ -417,6 +420,13 @@ async fn dispatch_inbound(
         }
     };
 
+    // 信令中转（阶段 8）：不走帧翻译与去重——它不是消息（无需 ack/离线），
+    // 是实时协商的转发（详见 handle_signal 的语义论证）
+    if env.kind == envelope_type::SIGNAL {
+        handle_signal(state, user_id, &env, tx).await;
+        return;
+    }
+
     let frame = match envelope_to_frame(&env) {
         Err(message) => {
             let _ = tx.try_send(Outbound::Text(error_envelope("bad_payload", message)));
@@ -474,6 +484,52 @@ async fn dispatch_inbound(
     }
 
     handle_frame(&state.sessions, session, conn_id, &frame, sink).await;
+}
+
+/// 信令中转（阶段 8）：WebRTC offer/answer/ICE/挂断的服务器转发。
+///
+/// # 语义定位：为什么它不是消息
+///
+/// 信令是**实时协商的 ephemeral 数据**：ICE candidate 五秒后到达就
+/// 过期了，离线补投一条过期的 offer 只会让重连后的对端困惑。所以它
+/// 刻意不走消息路径（不分配 `msg_id`、不 ack、不进离线队列），
+/// 而是与阶段 6 的事件同通道（`push_event` 直达）——**实时性是唯一
+/// 价值，可靠性由呼叫方重试保障**（没收到结果就重拨）。
+///
+/// # 不透明转发
+///
+/// `signal` 字段是任意 JSON，服务端不解释（与消息 content 同一
+/// 不透明语义）：offer/answer/candidate/hangup 都塞在里面，前端自
+/// 定义子类型。信令演进零服务端改动——阶段 8 之后加新协商类型
+///（如屏幕共享的 track 元数据）不需要碰这行代码。
+async fn handle_signal(
+    state: &AppState,
+    user_id: u64,
+    env: &Envelope,
+    tx: &mpsc::Sender<Outbound>,
+) {
+    let Some(to) = env.payload.get("to").and_then(id_from_value) else {
+        let _ = tx.try_send(Outbound::Text(error_envelope("bad_payload", "signal 需要 to")));
+        return;
+    };
+    let Some(signal) = env.payload.get("signal") else {
+        let _ =
+            tx.try_send(Outbound::Text(error_envelope("bad_payload", "signal 需要 signal 载荷")));
+        return;
+    };
+
+    // 门槛与消息一致：仅好友间可通话（信令伪造无效——客户端校验只是装饰）
+    if !state.friends.is_friend(user_id, to).await.unwrap_or(false) {
+        let _ = tx.try_send(Outbound::Text(error_envelope("not_friend", "仅好友之间可以通话")));
+        return;
+    }
+
+    // 下行复用 event 信封（kind 判别）：from 由服务端裁决，信号原样转发
+    let payload = json!({ "kind": "signal", "from": user_id.to_string(), "signal": signal });
+    if !state.sessions.push_event(to, payload.to_string()).await {
+        // 对端离线：立刻告诉呼叫方（信令不补投，离线重拨是用户语义）
+        let _ = tx.try_send(Outbound::Text(error_envelope("peer_offline", "对方不在线")));
+    }
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1064,5 +1120,115 @@ mod tests {
         assert_eq!(event["type"], "event");
         assert_eq!(event["payload"]["kind"], "friend_request");
         assert_eq!(event["payload"]["request"]["from_user"], id_a.to_string());
+    }
+
+    // ── 信令中转（阶段 8）：转发 / 门槛 / 离线反馈 ──
+
+    /// 主线：好友间 signal 转发——B 实时收到 `event`（`kind = signal`），
+    /// `from` 由服务端裁决，`signal` 载荷原样到达（不透明转发）。
+    #[tokio::test]
+    async fn signal_relays_between_friends_as_event() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (id_a, token_a) =
+            user_with_token(&state, &format!("ws_sig_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_b, token_b) =
+            user_with_token(&state, &format!("ws_sig_b_{}", uuid::Uuid::new_v4().simple())).await;
+        make_friends(&state, id_a, id_b).await;
+
+        let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
+        let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
+        let _ = alice.recv().await; // 消化双端 welcome
+        let _ = bob.recv().await;
+
+        // offer 形态的信令（内容服务端不解释——任意 JSON 都该原样到达）
+        alice
+            .send(
+                envelope_type::SIGNAL,
+                json!({ "to": id_b.to_string(), "signal": { "call": "offer", "sdp": "v=0…" } }),
+            )
+            .await;
+
+        let event = bob.recv().await;
+        assert_eq!(event["type"], "event", "信令下行复用 event 信封");
+        assert_eq!(event["payload"]["kind"], "signal");
+        assert_eq!(event["payload"]["from"], id_a.to_string(), "from 由服务端裁决");
+        assert_eq!(event["payload"]["signal"]["call"], "offer", "载荷原样转发");
+        assert_eq!(event["payload"]["signal"]["sdp"], "v=0…");
+
+        // 发送方无回执（信令不是消息：不 ack，可靠性由呼叫方重试保障）
+        alice.send(envelope_type::PING, json!({})).await;
+        let pong = alice.recv().await;
+        assert_eq!(pong["type"], envelope_type::PONG, "发送方只应看到自己的心跳应答");
+    }
+
+    /// 门槛：非好友发信令 → `not_friend` 错误，对端零动静。
+    #[tokio::test]
+    async fn signal_to_non_friend_is_rejected() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (_id_a, token_a) =
+            user_with_token(&state, &format!("ws_signf_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_b, token_b) =
+            user_with_token(&state, &format!("ws_signf_b_{}", uuid::Uuid::new_v4().simple())).await;
+        // 刻意不结好友
+
+        let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
+        let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
+        let _ = alice.recv().await;
+        let _ = bob.recv().await;
+
+        alice
+            .send(
+                envelope_type::SIGNAL,
+                json!({ "to": id_b.to_string(), "signal": { "call": "offer" } }),
+            )
+            .await;
+
+        let err = alice.recv().await;
+        assert_eq!(err["type"], envelope_type::ERROR);
+        assert_eq!(err["payload"]["code"], "not_friend", "通话门槛与消息门槛一致");
+
+        // B 侧零动静（用 ping/pong 验证连接活且没有杂信封）
+        bob.send(envelope_type::PING, json!({})).await;
+        let pong = bob.recv().await;
+        assert_eq!(pong["type"], envelope_type::PONG);
+    }
+
+    /// 离线反馈：对端不在线 → `peer_offline` 错误（信令不补投，
+    /// 呼叫方立刻知道——这是与消息路径的关键差异）。
+    #[tokio::test]
+    async fn signal_to_offline_peer_reports_back() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (id_a, token_a) =
+            user_with_token(&state, &format!("ws_sigoff_a_{}", uuid::Uuid::new_v4().simple()))
+                .await;
+        let (id_b, _token_b) =
+            user_with_token(&state, &format!("ws_sigoff_b_{}", uuid::Uuid::new_v4().simple()))
+                .await;
+        make_friends(&state, id_a, id_b).await;
+
+        let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
+        let _ = alice.recv().await; // B 刻意不连：离线
+
+        alice
+            .send(
+                envelope_type::SIGNAL,
+                json!({ "to": id_b.to_string(), "signal": { "call": "offer" } }),
+            )
+            .await;
+
+        let err = alice.recv().await;
+        assert_eq!(err["type"], envelope_type::ERROR);
+        assert_eq!(err["payload"]["code"], "peer_offline");
+        // 信令不进离线队列（离线补投一条过期的 offer 只会让对端困惑）
+        assert_eq!(state.sessions.offline_count(id_b), 0);
     }
 }

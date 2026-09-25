@@ -140,3 +140,24 @@ export type FriendEvent =
   | { kind: 'friend_request'; request: FriendRequestView }
   | { kind: 'friend_accepted'; user: User; by: User }
   | { kind: 'friend_removed'; user: User }
+
+/**
+ * 通话信令（阶段 8）：服务端不解释，仅转发（不透明语义与消息 content 同源）。
+ * `call` 标签判别各阶段协商载荷——offer/answer/candidate/hangup/reject。
+ */
+export type CallSignal =
+  | { call: 'offer'; sdp: string; media: CallMedia }
+  | { call: 'answer'; sdp: string }
+  | { call: 'candidate'; candidate: RTCIceCandidateInit }
+  | { call: 'hangup' }
+  | { call: 'reject' }
+
+/** 通话形态：摄像头通话 / 远程桌面（共享方只发屏幕轨）。 */
+export type CallMedia = 'audio-video' | 'screen'
+
+/** 下行信令事件（event 信封 payload，kind = signal）。 */
+export interface SignalEvent {
+  kind: 'signal'
+  from: string
+  signal: CallSignal
+}
