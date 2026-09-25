@@ -1,10 +1,12 @@
 # rust-im
 
+[![CI](https://github.com/lvdapiaoliang/rust-im/actions/workflows/ci.yml/badge.svg)](https://github.com/lvdapiaoliang/rust-im/actions/workflows/ci.yml)
+
 用 Rust 从零构建的开源 IM（即时通讯）全栈项目。对标 Telegram 的功能形态，目标支撑单机百万级长连接的实时消息系统。
 
 ## 项目状态
 
-**阶段 0~13 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
+**阶段 0~14 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
 客户端消息级重传 + 自研本地库（LSM 思想）+ ratatui TUI，全链路 e2e 含崩溃重传场景；
 Web 接入与持久化（FrameSink 传输解耦、PostgreSQL + sqlx、axum REST、WS 网关
 JSON 信封协议、Vue 3 前端骨架），TCP/TUI 与 Web 双接入并存；好友系统全流程
@@ -32,7 +34,12 @@ QUIC 传输与挂载盘语义层（quinn 多路复用：QuicStream 适配器实�
 阶段 12 泛型化的利息零改动兑现，两条会话流共用一条连接、无队头阻塞有测试钉死；
 im-mount：手写 LRU（slab 下标版，零 unsafe）+ 内存 FS 语义层（FUSE 回调对齐 +
 POSIX errno 分类）+ 目录缓存「先改数据再失效」纪律 + IM → FS 视图映射（只读投影），
-WinFsp 驱动接线为本机环境诚实边界，见 docs/19）。
+WinFsp 驱动接线为本机环境诚实边界，见 docs/19）；开源工程化（GitHub Actions CI：
+fmt/clippy 门槛 + ubuntu/windows/macos 三平台测试矩阵，ubuntu job 配 PostgreSQL
+service 真跑数据库测试——兑现 `pool_or_skip` 阶段 5 立下的「CI 配真库补盲区」账单；
+CHANGELOG（Keep a Changelog 格式）+ workspace 统一版本（一处 bump 全 crate 生效）；
+mdBook 文档站 → GitHub Pages，见 CHANGELOG.md 与 book.toml；
+Actions 线上 runner 行为属未实机验证项，push 后见分晓）。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
@@ -50,7 +57,7 @@ WinFsp 驱动接线为本机环境诚实边界，见 docs/19）。
 | 11 | FFI SDK（C ABI 动态库 / JNI） | ✅ |
 | 12 | TLS（rustls）+ E2EE（Signal 双棘轮）+ 类型状态原生 API | ✅ |
 | 13 | QUIC（quinn 多路复用）+ 挂载盘语义层（im-mount，WinFsp 接线为诚实边界） | ✅ |
-| 14 | 开源工程化（CI 矩阵 / 文档站） | ⬜ |
+| 14 | 开源工程化（CI 三平台矩阵 + PostgreSQL service / CHANGELOG + 统一版本 / mdBook 文档站） | ✅ |
 
 > 阶段重排说明：阶段 5~9 新增 Web 接入与社交功能，原压测/FFI/桌面+E2EE/QUIC/
 > 工程化顺延为 10~14，详见 [docs/00-roadmap.md](docs/00-roadmap.md)。
@@ -104,6 +111,9 @@ crates/
 └── xtask/         构建任务：交叉编译、SDK 打包
 
 web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 cargo 成员）
+.github/workflows/ CI：ci.yml（fmt/clippy + 三平台测试矩阵 + PostgreSQL service）、pages.yml（mdBook → GitHub Pages）
+CHANGELOG.md       版本历史（Keep a Changelog 格式，0.1.0 按阶段 0~14 分节）
+book.toml          mdBook 文档站配置（目录来源 docs/SUMMARY.md，产物 book/ 不入库）
 ```
 
 ## 学习文档
@@ -126,6 +136,9 @@ web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 ca
 - [18 - TLS 与 E2EE：rustls 传输加密 + Signal 双棘轮 + 类型状态原生 API](docs/18-tls-e2ee.md)（阶段 12）
 - [19 - QUIC 与挂载盘：多路复用传输 + IM 数据的文件系统视图](docs/19-quic-fuse.md)（阶段 13）
 - [20 - Rust 全栈踩坑与填坑实录（含业务开发常见错误）](docs/20-rust-pitfalls.md)（全程）
+
+在线文档站（mdBook → GitHub Pages，push 后生效）：<https://lvdapiaoliang.github.io/rust-im/> ·
+版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 
