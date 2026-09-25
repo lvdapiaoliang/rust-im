@@ -1,6 +1,6 @@
 [package]
 name = "im-sdk"
-description = "FFI SDK：将 Rust IM 内核封装为 C ABI 动态库（.so/.dll/.dylib），供多端调用"
+description = "FFI SDK：将 Rust IM 客户端内核封装为 C ABI 动态库（.so/.dll/.dylib），供多端调用"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,13 +11,35 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-im-transport.workspace = true
-im-crypto.workspace = true
+# SDK 包装的是「完整客户端内核」：连接状态机/重传/离线同步都在 im-client
+im-client.workspace = true
+# 事件编组（Msg 字段）与 Bytes 内容句柄
 im-protocol.workspace = true
+# ShutdownTx（destroy 语义）与事件通道
+im-transport.workspace = true
+bytes.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 
-# 阶段 6 将添加 crate-type = ["cdylib"] 输出动态库，
-# 并用 cbindgen 生成 C 头文件、提供 Java(JNI) 调用示例
+# JNI 绑定（feature 门控）：默认构建不引入——C ABI 用户不需要 JVM 胶水
+jni = { version = "0.21", optional = true }
+
+[dev-dependencies]
+# 测试直接对真实会话核心跑端到端（与 im-bench 同款服务端）
+im-server.workspace = true
+tokio-test.workspace = true
+
+[features]
+# JNI 导出（Java_com_im_sdk_*）：构建 Android/桌面 Java 集成时启用
+jni = ["dep:jni"]
+
 [lib]
 name = "im_sdk"
+# cdylib：产出 C ABI 动态库（.so/.dll/.dylib）——给 C/Java/其他语言的分发包
+# rlib：  供 Rust 侧测试与（阶段 12 的）Tauri 桌面壳直接链接
+crate-type = ["cdylib", "rlib"]
+
+[[example]]
+name = "demo_server"
+# JNI 冒烟演示配套的演示服务端：StaticToken，一条命令可起
+required-features = []
