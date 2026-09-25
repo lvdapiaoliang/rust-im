@@ -644,10 +644,18 @@ WebFetch Actions 页面才抓出来。
 不存在的 action `peaceiris/action-mdbook`（少一个 s），build job 2s 就报
 `Unable to resolve action ... repository not found`——正确名是
 `peaceiris/actions-mdbook`。本地 `mdbook build` 全绿只证明 mdBook 本身
-能跑，**证明不了 workflow 里引用的第三方 action 名字对**。两个 bug
-归一条元教训：CI 配置的每个外部引用（runner 能力、action 名、image
-tag）都属实机验证边界，push 后必须回看 Actions 页面，别拿「本地
-全绿」当「线上能跑」。
+能跑，**证明不了 workflow 里引用的第三方 action 名字对**。
+
+**第三个缺陷**（改对 action 名后才暴露）：build 进到 `actions/configure-pages`
+报 `Get Pages site failed ... Not Found`——仓库的 GitHub Pages 还没开（Source
+未选 GitHub Actions）。这是写在注释里的「预置条件」，但人工没进 Settings
+做过——用 `configure-pages` 的 `enablement: true` 凭 `pages: write` 权限自动
+开启，免去人工。**这三个缺陷是递进的**：修好一个才能跑到下一个（容器
+报错遮住了一切→action 名错遮住了 build→build 过了才轮到 Pages 未开）。
+
+三个 bug 归一条元教训：CI 配置的每个外部引用（runner 能力、action 名、
+image tag、Pages 开启状态）都属实机验证边界，push 后必须回看 Actions
+页面，别拿「本地全绿」当「线上能跑」。
 
 ---
 
