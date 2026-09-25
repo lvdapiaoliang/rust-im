@@ -31,7 +31,7 @@ use im_transport::{
     Connection, GatewayConfig, QuicAcceptor, QuicConnection, QuicConnector, QuicStream,
 };
 
-/// 演示端口固定（紧挨 tls_demo 的 18889，方便对比抓包：
+/// 演示端口固定（紧挨 `tls_demo` 的 18889，方便对比抓包：
 /// 一个抓 TCP，一个抓 UDP）。
 const DEMO_ADDR: &str = "127.0.0.1:18890";
 
@@ -120,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// QUIC 客户端小脚手架：**一条流**上的帧连接 + 递增 seq（与协议约定一致）。
-/// 对照 tls_demo 的 TlsDemoClient：只有 connect 换成了「在共享连接上开流」，
+/// 对照 `tls_demo` 的 TlsDemoClient：只有 connect 换成了「在共享连接上开流」，
 /// 其余逐行相同——上层根本感知不到传输换了。
 struct QuicDemoClient {
     conn: Connection<QuicStream>,
