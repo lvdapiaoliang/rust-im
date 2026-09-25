@@ -167,7 +167,7 @@ fn locate(v: u64) -> (usize, usize) {
         return (0, slot);
     }
     let mag = 63 - v.leading_zeros(); // floor(log2 v)；v ≥ 256 ⇒ mag ≥ 8
-    let bucket = usize::from(mag - SIGNIFICANT_BITS + 1);
+    let bucket = usize::try_from(mag - SIGNIFICANT_BITS + 1).expect("桶号装得下 usize");
     let shifted = v >> (bucket - 1);
     let slot = usize::try_from(shifted - SLOTS).expect("同桶内偏移 < 256，usize 必装得下");
     (bucket, slot)

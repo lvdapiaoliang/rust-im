@@ -28,7 +28,7 @@
 //!
 //! 学习文档：`docs/16-perf.md`（到达率与延迟分布的实测数据归档在那里）。
 
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -39,7 +39,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use clap::Args;
 use im_client::{ClientConfig, ClientEvent, ClientHandle};
-use im_protocol::{Cmd, DEFAULT_MAX_FRAME_LEN, Frame, Handshake, HandshakeAck, Payload};
+use im_protocol::{Cmd, DEFAULT_MAX_FRAME_LEN, Frame};
 use im_server::{SessionConfig, StaticToken};
 use im_transport::{Connection, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
@@ -235,6 +235,31 @@ async fn pump_in(
     }
 }
 
+/// 堆元素：`(到达时刻, 入队序, 帧)`。比较只看前二元——序号全局
+/// 唯一，比较永远不会走到 `Frame`；它没有 `Ord`，也**不该**为了进堆
+/// 而 `impl Ord`（测量代码不给被测类型追加语义，docs/20 §8）。
+struct HeapItem(tokio::time::Instant, u64, Frame);
+
+impl PartialEq for HeapItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && self.1 == other.1
+    }
+}
+
+impl Eq for HeapItem {}
+
+impl PartialOrd for HeapItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HeapItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.0, self.1).cmp(&(other.0, other.1))
+    }
+}
+
 /// 调度侧泵：小顶堆按到达时刻出队，相等时刻按入队序（FIFO 保底）。
 ///
 /// 堆元素 `(到达时刻, 入队序, 帧)`：序号作平局裁决——抖动为零时
@@ -245,7 +270,7 @@ async fn pump_out(
     mut writer: WriteHalf,
     stats: &LinkStats,
 ) {
-    let mut heap: BinaryHeap<Reverse<(tokio::time::Instant, u64, Frame)>> = BinaryHeap::new();
+    let mut heap: BinaryHeap<Reverse<HeapItem>> = BinaryHeap::new();
     let mut seq: u64 = 0;
     let mut rx_open = true;
     loop {
@@ -255,12 +280,12 @@ async fn pump_out(
                 item = rx.recv(), if rx_open => match item {
                     Some((frame, ready)) => {
                         seq += 1;
-                        heap.push(Reverse((ready, seq, frame)));
+                        heap.push(Reverse(HeapItem(ready, seq, frame)));
                     }
                     None => rx_open = false,
                 },
                 _ = tokio::time::sleep_until(due) => {
-                    let Reverse((_, _, frame)) = heap.pop().expect("非空堆必能弹出");
+                    let Reverse(HeapItem(_, _, frame)) = heap.pop().expect("非空堆必能弹出");
                     if writer.write_frame(&frame).await.is_err() {
                         return; // 写半部死亡：丢弃余下帧，方向收工
                     }
@@ -271,7 +296,7 @@ async fn pump_out(
             match rx.recv().await {
                 Some((frame, ready)) => {
                     seq += 1;
-                    heap.push(Reverse((ready, seq, frame)));
+                    heap.push(Reverse(HeapItem(ready, seq, frame)));
                 }
                 None => rx_open = false,
             }
@@ -355,7 +380,10 @@ struct ReliabilityOutcome {
 /// 任一客户端握手被拒（不应发生——口令正确）或装配失败时提前退出。
 async fn run_reliability(cfg: ReliabilityCfg) -> Result<ReliabilityOutcome> {
     anyhow::ensure!(cfg.messages >= 1, "至少发一条消息");
-    anyhow::ensure!(cfg.loss_permille <= 1000, "丢包率不能超过 1000‰");
+    anyhow::ensure!(
+        cfg.up.loss_permille <= 1000 && cfg.down.loss_permille <= 1000,
+        "丢包率不能超过 1000‰"
+    );
 
     // ── 装配：真实服务端 + 弱网代理 ──
     let server_cfg = SessionConfig {
@@ -542,7 +570,7 @@ async fn spawn_client(
         retry_max_attempts: cfg.retry_max_attempts,
         ..ClientConfig::new(proxy_addr.to_string(), user_id, "weak")
     };
-    let handle = im_client::run_client(config, events_tx, shutdown_rx);
+    let handle = im_client::run_client(config, events_tx, shutdown_rx).await;
     Ok((handle, events_rx))
 }
 
@@ -636,7 +664,7 @@ fn fmt_dur(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use im_protocol::Msg;
+    use im_protocol::{Handshake, HandshakeAck, Msg, Payload};
     use im_server::AllowAll;
     use std::time::Duration;
 
