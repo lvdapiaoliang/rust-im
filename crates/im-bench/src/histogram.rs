@@ -218,7 +218,7 @@ mod tests {
             h.record_ns(v);
         }
         assert_eq!(h.count(), 5);
-        assert_eq!(h.percentile_ns(20), 1); // rank = ceil(0.2×5) = 1 → 最小
+        assert_eq!(h.percentile_ns(20), 0); // rank = ceil(0.2×5) = 1 → 最小样本
         assert_eq!(h.percentile_ns(50), 42);
         assert_eq!(h.percentile_ns(100), 255);
         assert_eq!(h.min().expect("有样本").as_nanos(), 0);
@@ -318,11 +318,16 @@ mod tests {
         assert_eq!(h.mean().expect("有样本").as_nanos(), 200);
     }
 
-    /// Duration 包装与纳秒口径一致。
+    /// Duration 包装与纳秒口径一致（3ms 落在对数桶：分位数报告槽下界，
+    /// 与记录值相差 < 一个步长——草图精度是设计语义，不是误差）。
     #[test]
     fn duration_wrapper_matches_ns() {
         let mut h = LatencyHist::new();
         h.record(Duration::from_millis(3));
-        assert_eq!(h.percentile_ns(100), 3_000_000);
+        let (b, s) = locate(3_000_000);
+        let reported = h.percentile_ns(100);
+        assert_eq!(reported, bucket_value(b, s), "报告所在槽的下界");
+        let step = 1u64 << (b - 1);
+        assert!(reported <= 3_000_000 && 3_000_000 - reported < step);
     }
 }
