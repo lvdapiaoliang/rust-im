@@ -63,8 +63,10 @@ pub extern "C" fn im_sdk_error_string(code: i32) -> *const c_char {
     // `CString::new` 非 const，用 OnceLock 惰性建表后只读。
     static STRINGS: std::sync::OnceLock<Vec<CString>> = std::sync::OnceLock::new();
     let table = STRINGS.get_or_init(|| {
-        (0..=error::ERR_INTERNAL)
-            .chain(std::iter::once(error::ERR_INTERNAL + 1)) // 末位：unknown 兜底
+        // 表长 = 定义码数 + 1（末位是 unknown 兜底，任意越界码都落到它）；
+        // 上限跟随最新定义码（阶段 12 新增 ERR_HANDSHAKE_REJECTED 后自动伸长）
+        (0..=error::ERR_HANDSHAKE_REJECTED)
+            .chain(std::iter::once(error::ERR_HANDSHAKE_REJECTED + 1)) // 末位：unknown 兜底
             .map(|code| {
                 CString::new(error::error_string(code))
                     .expect("错误说明不含内部 NUL——error_string 全是可读英文")
@@ -74,7 +76,7 @@ pub extern "C" fn im_sdk_error_string(code: i32) -> *const c_char {
     let last = table.len() - 1;
     // try_from 收口（项目纪律：裸 cast 只在论证后用）；contains 已保证
     // 非负，unwrap_or 只是让编译器不必猜两者的蕴含关系
-    let idx = if (0..=error::ERR_INTERNAL).contains(&code) {
+    let idx = if (0..=error::ERR_HANDSHAKE_REJECTED).contains(&code) {
         usize::try_from(code).unwrap_or(last)
     } else {
         last
@@ -262,6 +264,19 @@ unsafe fn free_event_boxed(event: *mut ImSdkEvent) {
         let slice = std::ptr::slice_from_raw_parts_mut(event.data, event.data_len);
         drop(unsafe { Box::from_raw(slice) });
     }
+}
+
+/// 安全包装：Rust 原生消费面（`native.rs`）按值持有一条 [`ImSdkEvent`] 时，
+/// 用它履行「谁分配谁释放」。
+///
+/// [`ImSdkEvent`] 的 `data` 是裸指针，结构体 drop **不会**自动回收它
+/// （宽结构不实现 Drop 的理由见 core.rs 注释）——C 面靠 `im_sdk_event_free`，
+/// Rust 面就是本函数。unsafe 仍然只住在本模块（SAFETY 集中区），
+/// native.rs 由此保持全安全代码。
+pub(crate) fn reclaim_event(event: ImSdkEvent) {
+    let raw = Box::into_raw(Box::new(event));
+    // SAFETY: raw 是上一行刚装箱的活指针，来源与唯一性天然成立
+    unsafe { free_event_boxed(raw) };
 }
 
 /// C 字符串入参 → Rust `String`：NUL 结尾 + UTF-8 校验，缺一即 None。
