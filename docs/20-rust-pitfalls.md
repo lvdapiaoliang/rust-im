@@ -105,6 +105,27 @@ std::env::var(key).unwrap_or_default().unwrap_or_else(|_| ...)
 **教训**：`unwrap_or_*` 家族全在 `Result/Option` 上；链式调用前先想清楚每一步
 的返回类型。环境变量解析的边界情况（未设置 vs 空串）比 API 拼写更容易漏。
 
+### 2.6 feature 集不同导致 cdylib 互相覆盖：UnsatisfiedLinkError 假象【阶段 11】
+
+**现象**：JNI 冒烟报 `UnsatisfiedLinkError: 'java.lang.String im.sdk.Sdk.nativeVersion()'`
+——库加载成功、符号找不到（比「库不存在」迷惑得多：明明 dll 在、路径对）。
+
+**根因**：cargo 的构建缓存按 feature 集**整体区分**。先
+`cargo build --features jni` 产出带 JNI 导出的 dll，随后
+`cargo run --example demo_server`（不带 jni）重建了同一个
+`im_sdk.dll`，**静默覆盖**成无 JNI 导出的版本。看 dll 时间戳才对上。
+
+**修复/纪律**：SDK 打包入口（`cargo xtask sdk`）钉死 feature 集；
+调试这类「符号找不到」先查产物时间戳是不是被别的构建命令动过。
+
+### 2.7 edition 2024：`no_mangle` 是 unsafe 属性，必须写 `#[unsafe(no_mangle)]`【阶段 11】
+
+8 处 `#[no_mangle]` 全部编译报错——edition 2024 把 `no_mangle` 升级为
+unsafe attribute（它能把任意符号暴露给链接器，副作用不受隔离），
+语法上必须显式承认风险。同类还有 `#[unsafe(no_mangle)]` 的兄弟
+`export_name`/`link_section`。看到 `unsafe attribute` 字样的报错，
+照着加 `unsafe(...)` 包裹层即可，不是设计问题。
+
 ---
 
 ## 三、async / Tokio 运行时
@@ -161,6 +182,33 @@ Rust 把内存安全兜底了，但"过早释放"依然是逻辑 bug。
   **可重入**的操作（`read_frame`、`rx.recv` 这类"要么完成要么像没发生"的原语）。
   判别口诀：先 poll 内部状态再返回 Pending 的操作都不取消安全
   （典型反例：`read_exact` 读了一半）。
+
+### 3.4 嵌套 runtime：block_on 桥接与 tokio 测试环境天然冲突【阶段 11】
+
+**现象**：`#[tokio::test]` 里调 SDK 同步入口，进程直接 abort
+（`STATUS_STACK_BUFFER_OVERRUN`，连 panic 消息都没有）。
+
+**根因**：`SdkClient` 每实例一个专属 `tokio::Runtime`，同步入口内部
+`block_on`——在 tokio 上下文里再建/再进 runtime 是硬禁（
+"Cannot start a runtime from within a runtime"，abort 级）。
+
+**修复/纪律**：这不是缺陷而是定位——SDK 的宿主（C/Java 进程）
+**没有环境 runtime**。测试照真实调用方形态写：普通 `#[test]` +
+服务端挂独立 runtime（`TestServer { _rt, addr, .. }`，drop 即停）。
+测试形态 = 生产形态，反而是福。
+
+### 3.5 `tokio::timeout` 三层语义写反：编译全绿、测试当场抓住【阶段 11】
+
+`timeout(d, recv)` 的返回要剥两层：外层 `Result` 是**超时与否**，
+内层 `Option` 是**通道关没关**——`Ok(Some(ev))` 收到事件；
+`Ok(None)` recv 完成但通道关闭；`Err(Elapsed)` 超时。最初把
+`Ok(None)` 当超时、`Err` 当通道关闭（直觉以为「Err = 异常 = 坏消息」），
+导致客户端停止后 `ERR_STOPPED` 永远发不出来。
+
+**纪律**：嵌套 `Result<Option<T>, E>` 的每个分支都要写测试覆盖
+（空载荷事件的超时路径专门补了断言）；`timeout` 的语义是「包住一个
+future 看它跑多久」，它自己**不区分**内层为什么完成——分支语义
+要自己列全。
 
 ---
 
@@ -305,6 +353,52 @@ UI 操作、清理路径都不得直接改它。
 对照：流量清洗解决 DDoS vs Anycast 架构稀释 DDoS。压测阶段（10）的
 "调参扛量"与"改架构扛量"也是同一对选择。
 
+### 5.5 Send 包装白做：闭包精确捕获只看字段路径，三连败后才找到唯一形态【阶段 11 FFI，最贵】
+
+**场景**：事件泵要进 `std::thread::spawn` 的闭包，携带
+`user_data: *mut c_void`（C 回调上下文）——裸指针不是 `Send`。
+
+**三连败**：
+1. newtype `struct UserData(*mut c_void)` + `unsafe impl Send`——
+   仍报 E0277：闭包体里写 `user_data.0`，RFC 2229 精确捕获只捕获
+   **字段路径**（还是那个裸指针），Send 包装白做；
+2. 改模式解构 `let UserData(p) = user_data`——同样失败：解构被
+   编译器归一化成字段捕获，不是「把整个结构体搬进去」；
+3. **成功**：泵循环体提成独立函数 `pump_loop(events, callback,
+   user_data)`，闭包只写 `move || pump_loop(events, callback,
+   user_data)`——结构体按值**传参**，闭包被迫捕获完整结构体。
+
+**教训**：`unsafe impl Send` 只声明资格，**捕获分析决定实际穿越的是
+什么**——两者要一起设计；当你「明明用了整个结构体」却报裸指针
+错误，那是精确捕获在拆你的字段。唯一可靠形态：让使用方式不可拆分
+（按值传参）。验证手段就是 `cargo check`，编译器不认，资格声明就是
+废纸。
+
+### 5.6 `c_void` 双胞胎：`std::os::raw::c_void` ≠ `std::ffi::c_void`【阶段 11】
+
+两个路径的同名类型**不是同一个类型**（历史兼容产物），混用报不兼容。
+FFI 层统一 `use std::ffi::{c_char, c_void}`（与 `core::ffi` 是同一批）。
+同理警惕：`std::os::raw::c_char` vs `std::ffi::c_char`。报「明明都是
+c_void 却不匹配」时，先查 import 路径。
+
+### 5.7 JNI 三件套：modified UTF-8、GlobalRef、线程 attach【阶段 11】
+
+三个都是 JNI 规范级陷阱，一次集成全部踩齐（完整讲解见 docs/17 §4.4）：
+
+1. **modified UTF-8**：裸 `GetStringUTFChars` 给的是 CESU-8 变体（NUL
+   双字节、增补字符非标准），与真 UTF-8 不兼容——JNI 最著名的坑。
+   jni-rs 的 `get_string` 内部经 cesu8 解回标准 UTF-8；冒烟用中文
+   消息验证全链路无损；
+2. **GlobalRef**：局部引用出不了原生调用帧，泵线程长期持有 Java 回调
+   必须全局引用，且最终**显式 delete**（GC 不替你管 native 侧的全局
+   引用）。回收顺序即安全：先 join 泵，再回收事件桥，反了就是
+   use-after-free；
+3. **线程 attach**：事件泵是普通线程，JVM 不认识——回调前
+   `attach_current_thread()`（AttachGuard，drop 自动 detach，DerefMut
+   暴露 JNIEnv）。顺带记录 JDK 27 新行为：`System.loadLibrary` 触发
+   restricted native access WARNING（未来默认 block），真实集成要加
+   `--enable-native-access=ALL-UNNAMED`。
+
 ---
 
 ## 六、环境与协作（Windows / PowerShell）
@@ -400,8 +494,8 @@ Windows 的动态端口池**全局共享**——三跑数字 55,497/55,487/55,49
   错误是类型，可 match、可文档化；
 - **应用层**：`anyhow` + `.context("在做什么时失败")` ——给底层错误补上
   业务语境再上抛；
-- **FFI 边界（阶段 11 预告）**：错误码模型，`Result` 不跨 C ABI——
-  错误在边界翻译成机器可读码。
+- **FFI 边界（阶段 11 已落地）**：错误码模型，`Result` 不跨 C ABI——错误
+  在边界翻译成机器可读码（docs/17 §4.1），未知码兑底串保向前兼容。
 
 对照 Java：checked exception ≈ thiserror（类型化、强制处理），
 RuntimeException ≈ anyhow（带上下文的动态错误），但 Rust 把"抛"变成
@@ -423,9 +517,11 @@ RuntimeException ≈ anyhow（带上下文的动态错误），但 Rust 把"抛"
 8. **`allow/unwrap/expect` 必须带论证**（§2.3）；
 9. **自动修复产物必须人工 review**（§2.2）；
 10. **诚实记录未验证项**（§6.4）——没验证过什么，和验证过什么一样写清楚；
-11. **提交消息走文件**（§6.3），临时文件不落仓库根目录（§2.4）。
+11. **提交消息走文件**（§6.3），临时文件不落仓库根目录（§2.4）；
+12. **SDK 打包钉死 feature 集**（§2.6）；跨线程的裸指针上下文用
+    「按值传参」的闭包形态（§5.5）。
 
-## 九、阶段 10~14 增补位
+## 九、阶段 12~14 增补位
 
-后续阶段踩到的新坑按同格式追加到对应章节（FFI 的内存契约坑进 §七、
-QUIC 的迁移坑进新节）。坑是项目最有生命力的文档——**宁可文档变厚，不可经验失传**。
+后续阶段踩到的新坑按同格式追加到对应章节（E2EE 的密钥管理坑、
+QUIC 的迁移坑进对应节）。坑是项目最有生命力的文档——**宁可文档变厚，不可经验失传**。

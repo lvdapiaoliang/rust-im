@@ -187,10 +187,7 @@ impl SdkClient {
     ///
     /// # Errors
     /// 见上；另见 [`crate::error`] 全表。
-    pub fn poll_event(
-        &mut self,
-        timeout: std::time::Duration,
-    ) -> Result<Option<ImSdkEvent>, i32> {
+    pub fn poll_event(&mut self, timeout: std::time::Duration) -> Result<Option<ImSdkEvent>, i32> {
         let Some(events) = self.events.as_mut() else {
             return Err(error::ERR_POLL_WITH_CALLBACK);
         };
@@ -212,9 +209,7 @@ impl SdkClient {
                     let mut expanded = normalize(event);
                     // VecDeque 尾部进、头部出：保序
                     self.pending.append(&mut expanded);
-                    self.pending
-                        .pop_front()
-                        .expect("normalize 对非空输入至少产出一条")
+                    self.pending.pop_front().expect("normalize 对非空输入至少产出一条")
                 }
                 // recv 完成、拿到 None = 所有发送端已 drop：状态机已落幕
                 Ok(None) => return Err(error::ERR_STOPPED),
@@ -265,9 +260,7 @@ pub fn alloc_event(event: ClientEvent) -> ImSdkEvent {
         ClientEvent::Connected { session_id } => {
             (EVENT_CONNECTED, session_id, 0, 0, 0, 0, Vec::new())
         }
-        ClientEvent::Disconnected => {
-            (EVENT_DISCONNECTED, 0, 0, 0, 0, 0, Vec::new())
-        }
+        ClientEvent::Disconnected => (EVENT_DISCONNECTED, 0, 0, 0, 0, 0, Vec::new()),
         ClientEvent::Message(im_protocol::Msg { from, to, msg_id, client_msg_id, content }) => {
             (EVENT_MESSAGE, 0, msg_id, client_msg_id, from, to, content.to_vec())
         }
@@ -281,9 +274,7 @@ pub fn alloc_event(event: ClientEvent) -> ImSdkEvent {
             // normalize 已在所有入口展开；直接编组等于程序性错误，宁可显式炸
             unreachable!("SyncBatch 必须先经 normalize 展开")
         }
-        ClientEvent::Rejected { reason } => {
-            (EVENT_REJECTED, 0, 0, 0, 0, 0, reason.into_bytes())
-        }
+        ClientEvent::Rejected { reason } => (EVENT_REJECTED, 0, 0, 0, 0, 0, reason.into_bytes()),
         ClientEvent::SendFailed { client_msg_id } => {
             (EVENT_SEND_FAILED, 0, 0, client_msg_id, 0, 0, Vec::new())
         }
@@ -298,16 +289,7 @@ pub fn alloc_event(event: ClientEvent) -> ImSdkEvent {
         (Box::into_raw(boxed).cast::<u8>(), len)
     };
 
-    ImSdkEvent {
-        type_,
-        session_id,
-        msg_id,
-        client_msg_id,
-        from,
-        to,
-        data,
-        data_len,
-    }
+    ImSdkEvent { type_, session_id, msg_id, client_msg_id, from, to, data, data_len }
 }
 
 #[cfg(test)]
@@ -332,7 +314,7 @@ mod tests {
         _sessions: im_server::Sessions,
         _shutdown: im_transport::ShutdownTx,
     }
-    
+
     fn spawn_test_server(config: SessionConfig) -> TestServer {
         let rt = Runtime::new().expect("测试服务端运行时应能创建");
         let (addr, sessions, shutdown) = rt
@@ -340,7 +322,7 @@ mod tests {
             .expect("测试服务端应能启动");
         TestServer { _rt: rt, addr: addr.to_string(), _sessions: sessions, _shutdown: shutdown }
     }
-    
+
     /// 拿到事件后安全地读字段（测试侧的「回调」就是它）。
     ///
     /// 测试代码读裸指针也过一遍 allow：生产代码零 unsafe 的分层承诺
@@ -355,15 +337,15 @@ mod tests {
         };
         (ev.type_, data)
     }
-    
+
     /// poll 全流程（双客户端互发）：编组正确性 + 守恒。
     #[test]
     fn poll_roundtrip_delivers_message_between_two_clients() {
         let srv = spawn_test_server(SessionConfig::default());
         let addr = srv.addr.clone();
-    
+
         let mut alice = create(&addr, 1, "demo", None).unwrap();
-        let mut bob = create(&addr, 2, "demo", None).unwrap();    
+        let mut bob = create(&addr, 2, "demo", None).unwrap();
         // 两端都握手成功
         for client in [&mut alice, &mut bob] {
             let ev = client.poll_event(Duration::from_secs(5)).unwrap().unwrap();
@@ -371,35 +353,35 @@ mod tests {
             assert_eq!(ty, EVENT_CONNECTED);
             assert!(ev.session_id > 0);
         }
-    
+
         // Bob → Alice 一条消息：Bob 侧看到 Queued + Ack，Alice 侧看到 Message
         bob.send(1, b"hello ffi").unwrap();
-    
+
         let alice_ev = alice.poll_event(Duration::from_secs(5)).unwrap().unwrap();
         let bob_queued = bob.poll_event(Duration::from_secs(5)).unwrap().unwrap();
         let bob_ack = bob.poll_event(Duration::from_secs(5)).unwrap().unwrap();
-    
+
         assert_eq!(borrow(&alice_ev), (EVENT_MESSAGE, b"hello ffi".to_vec()));
         assert_eq!(borrow(&bob_queued), (EVENT_MESSAGE_QUEUED, b"hello ffi".to_vec()));
         assert_eq!(borrow(&bob_ack).0, EVENT_ACK);
-    
+
         alice.destroy();
         bob.destroy();
     }
-    
+
     /// 离线消息 → SyncBatch → normalize 展开成逐条 Message（保序）。
     #[test]
     fn sync_batch_expands_into_individual_messages() {
         let srv = spawn_test_server(SessionConfig::default());
         let addr = srv.addr.clone();
-    
+
         // Alice 先上、发两条给离线的 Bob、确认送达、下线
         let mut alice = create(&addr, 1, "demo", None).unwrap();
         let (ty, _) = borrow(&alice.poll_event(Duration::from_secs(5)).unwrap().unwrap());
         assert_eq!(ty, EVENT_CONNECTED);
         alice.send(2, b"first").unwrap();
         alice.send(2, b"second").unwrap();
-    
+
         // 等 Alice 收到两个 Ack（服务端已托管两条消息）
         let mut acks = 0;
         while acks < 2 {
@@ -409,12 +391,12 @@ mod tests {
             }
         }
         alice.destroy();
-    
+
         // Bob 上线：Connected 之后应把离线的两条逐条收全
         let mut bob = create(&addr, 2, "demo", None).unwrap();
         let (ty, _) = borrow(&bob.poll_event(Duration::from_secs(5)).unwrap().unwrap());
         assert_eq!(ty, EVENT_CONNECTED);
-    
+
         let mut got = Vec::new();
         while got.len() < 2 {
             let ev = bob.poll_event(Duration::from_secs(5)).unwrap().unwrap();
@@ -427,7 +409,7 @@ mod tests {
         assert_eq!(got, vec![b"first".to_vec(), b"second".to_vec()]);
         bob.destroy();
     }
-    
+
     /// 握手被拒：Rejected 事件携带 reason 数据；此后 send 返回 ERR_STOPPED。
     #[test]
     fn rejected_handshake_yields_event_then_stopped() {
@@ -436,23 +418,20 @@ mod tests {
             ..SessionConfig::default()
         });
         let addr = srv.addr.clone();
-        
+
         let mut client = create(&addr, 1, "demo", None).unwrap();
         let ev = client.poll_event(Duration::from_secs(5)).unwrap().unwrap();
         let (ty, reason) = borrow(&ev);
         assert_eq!(ty, EVENT_REJECTED);
         assert!(!reason.is_empty(), "拒绝原因不该是空串");
-        
+
         // 状态机落幕有个微小窗口：Rejected 送达时任务还没 drop cmd_rx。
         // 先等事件通道关闭（任务确定结束），send 的断言才是确定性的。
-        assert!(matches!(
-            client.poll_event(Duration::from_secs(2)),
-            Err(error::ERR_STOPPED)
-        ));
+        assert!(matches!(client.poll_event(Duration::from_secs(2)), Err(error::ERR_STOPPED)));
         assert_eq!(client.send(2, b"x"), Err(error::ERR_STOPPED));
         client.destroy();
     }
-    
+
     /// 「上线后立刻销毁」：destroy 必须在有限时间内返回（不挂死）。
     #[test]
     fn destroy_shuts_down_cleanly_without_hanging() {
@@ -461,20 +440,20 @@ mod tests {
             ..SessionConfig::default()
         });
         let addr = srv.addr.clone();
-    
+
         let mut client = create(&addr, 1, "demo", None).unwrap();
         let (ty, _) = borrow(&client.poll_event(Duration::from_secs(5)).unwrap().unwrap());
         assert_eq!(ty, EVENT_CONNECTED);
         // 立刻销毁：挂死即测试超时失败
         client.destroy();
     }
-    
+
     /// 空内容事件不分配 data 指针（null + 0）。
     #[test]
     fn empty_payload_events_have_null_data() {
         let srv = spawn_test_server(SessionConfig::default());
         let addr = srv.addr.clone();
-    
+
         let mut client = create(&addr, 1, "demo", None).unwrap();
         let ev = client.poll_event(Duration::from_secs(5)).unwrap().unwrap();
         assert_eq!(borrow(&ev).0, EVENT_CONNECTED);

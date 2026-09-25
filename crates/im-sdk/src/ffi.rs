@@ -29,7 +29,7 @@
 
 use std::ffi::{CStr, CString, c_char, c_void};
 
-use crate::core::{ImSdkEvent, SdkClient, EventCallback};
+use crate::core::{EventCallback, ImSdkEvent, SdkClient};
 use crate::error;
 
 /// 供 C 用的版本串：`concat!` 在**编译期**拼上 NUL 终止符，
@@ -72,11 +72,7 @@ pub extern "C" fn im_sdk_error_string(code: i32) -> *const c_char {
             .collect()
     });
     let last = table.len() - 1;
-    let idx = if (0..=error::ERR_INTERNAL).contains(&code) {
-        code as usize
-    } else {
-        last
-    };
+    let idx = if (0..=error::ERR_INTERNAL).contains(&code) { code as usize } else { last };
     table[idx].as_ptr()
 }
 
@@ -110,9 +106,7 @@ pub extern "C" fn im_sdk_client_create(
     // 回调模式装配：取走事件接收端（互斥保证 poll 再来必被拒）+ 起事件泵。
     // 泵起不来时把已建好的客户端销毁干净再报错——不留半启动的烂摊子。
     if let Some(cb) = callback {
-        let events = client
-            .take_events()
-            .expect("create 返回的客户端必然持有事件接收端");
+        let events = client.take_events().expect("create 返回的客户端必然持有事件接收端");
         match spawn_pump(events, cb, user_data) {
             Ok(pump) => client.attach_pump(pump),
             Err(_) => {
@@ -300,15 +294,17 @@ mod tests {
     /// 入参防御：null 字符串 → null 句柄；null 句柄 send/poll → INVALID_ARG。
     #[test]
     fn invalid_arguments_are_rejected_not_dereferenced() {
-        assert!(im_sdk_client_create(
-            std::ptr::null(),
-            1,
-            std::ptr::null(),
-            std::ptr::null(),
-            None,
-            std::ptr::null_mut(),
-        )
-        .is_null());
+        assert!(
+            im_sdk_client_create(
+                std::ptr::null(),
+                1,
+                std::ptr::null(),
+                std::ptr::null(),
+                None,
+                std::ptr::null_mut(),
+            )
+            .is_null()
+        );
 
         let rc = im_sdk_client_send(std::ptr::null_mut(), 1, b"x".as_ptr(), 1);
         assert_eq!(rc, error::ERR_INVALID_ARG);

@@ -66,7 +66,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 8 | 1对1 音视频 + 远程桌面（WebRTC P2P，WS 信令） | `web/` + `im-server/src/web` | 14 | ✅ 已完成 |
 | 9 | 群会议 + 屏幕共享（LiveKit SFU + docker-compose） | `web/` + `im-server/src/web` | 15 | ✅ 已完成 |
 | 10 | 压测与三级性能里程碑（M1 达成 99,969 连接；顺带修复接收窗楔死缺陷） | `im-bench` | 16 | ✅ 已完成 |
-| 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | 未开始 |
+| 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | ✅ 已完成 |
 | 12 | 桌面端（Tauri）+ E2EE（Signal） | `im-client` + `im-crypto` | 18 | 未开始 |
 | 13 | QUIC（quinn）+ 挂载盘（FUSE/WinFsp） | 扩展 | 19 | 未开始 |
 | 14 | 开源工程化：CI 矩阵 / 版本 / 文档站 | `.github` | — | 未开始 |
@@ -223,6 +223,7 @@ cargo test --workspace        # 全量测试
 cargo clippy --workspace --all-targets   # 静态检查（项目要求零警告）
 cargo fmt --all               # 格式化
 cargo xtask test              # 通过 xtask 跑测试（后续扩展更多任务）
+cargo xtask sdk               # 打包 FFI SDK 到 dist/sdk/（阶段 11）
 cargo run -p im-transport --example echo_demo   # 阶段 0 示例（见 docs/03 末尾）
 ```
 

@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-**阶段 0~10 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
+**阶段 0~11 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
 客户端消息级重传 + 自研本地库（LSM 思想）+ ratatui TUI，全链路 e2e 含崩溃重传场景；
 Web 接入与持久化（FrameSink 传输解耦、PostgreSQL + sqlx、axum REST、WS 网关
 JSON 信封协议、Vue 3 前端骨架），TCP/TUI 与 Web 双接入并存；好友系统全流程
@@ -18,7 +18,11 @@ TUI 对非 text 降级显示）已上线；群组系统（每群一个扇出 act
 压测与性能里程碑（M1 达成：单机 99,969 并发连接、每连接 29.59 KiB（双端）、
 拆除 6.02s 路由表清零；分位数草图（HdrHistogram 思想）从零实现；
 用户态弱网模拟器（确定性丢包/延迟/乱序）实测双向 10% 丢包 + 100ms RTT 下
-上行 100% 到达；顺带抓出并修复接收窗静默楔死缺陷，见 docs/16）。
+上行 100% 到达；顺带抓出并修复接收窗静默楔死缺陷，见 docs/16）；
+FFI SDK（`im-sdk`：同步外观 + 7 函数 C ABI + 手写 `im_sdk.h`，三条跨语言契约
+——内存/线程/错误；JNI 绑定（feature `jni`）经 JDK 27 真机冒烟：中文消息
+全链路无损、干净关闭；`cargo xtask sdk` 一键打包 dist/sdk，交叉编译诚实跳过，
+见 docs/17）。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
@@ -33,7 +37,7 @@ TUI 对非 text 降级显示）已上线；群组系统（每群一个扇出 act
 | 8 | 1对1 音视频 + 远程桌面（WebRTC P2P） | ✅ |
 | 9 | 群会议 + 屏幕共享（LiveKit SFU） | ✅ |
 | 10 | 压测与三级性能里程碑（M1 达成 99,969 连接；修复接收窗楔死缺陷） | ✅ |
-| 11 | FFI SDK（C ABI 动态库 / JNI） | ⬜ |
+| 11 | FFI SDK（C ABI 动态库 / JNI） | ✅ |
 | 12 | 桌面端（Tauri）+ E2EE（Signal 协议） | ⬜ |
 | 13 | QUIC + 挂载盘（FUSE / WinFsp） | ⬜ |
 | 14 | 开源工程化（CI 矩阵 / 文档站） | ⬜ |
@@ -55,6 +59,7 @@ cargo run -p im-server                     # 起服务端（TCP 127.0.0.1:8888 +
 cargo run -p im-client 127.0.0.1:8888 1 demo    # 起 TUI 客户端（TCP 二进制路径）
 cargo run -p im-bench --release -- conn-storm --connections 100000 --source-ips 7  # M1 连接风暴
 cargo run -p im-bench --release -- weak-link        # 弱网可靠性（10% 丢包 + 100ms RTT）
+cargo xtask sdk               # 打包 FFI SDK 到 dist/sdk/（头文件 + JNI 源 + 动态库）
 
 # Web 前端（另一个终端，Node 18+）
 cd web
@@ -80,7 +85,7 @@ crates/
 ├── im-storage/    存储层：自研简化 LSM（追加段/memtable/压实）+ WAL 恢复
 ├── im-server/     服务端：网关、会话路由、消息扇出
 ├── im-client/     客户端：消息重传/本地库/ratatui TUI → 桌面端
-├── im-sdk/        FFI SDK：C ABI 动态库（.so/.dll/.dylib）
+├── im-sdk/        FFI SDK：C ABI 动态库（.so/.dll/.dylib）+ JNI 绑定
 ├── im-bench/      压测：连接风暴、吞吐基准、弱网模拟
 └── xtask/         构建任务：交叉编译、SDK 打包
 
@@ -103,8 +108,9 @@ web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 ca
 - [14 - WebRTC 音视频与远程桌面](docs/14-webrtc.md)（阶段 8）
 - [15 - 群会议与屏幕共享（LiveKit SFU）](docs/15-meeting.md)（阶段 9）
 - [16 - 性能压测与三级里程碑](docs/16-perf.md)（阶段 10）
+- [17 - FFI SDK：C ABI / JNI / 内存契约](docs/17-ffi.md)（阶段 11）
 - [20 - Rust 全栈踩坑与填坑实录（含业务开发常见错误）](docs/20-rust-pitfalls.md)（全程）
-- 17~19 随开发阶段逐步补充（FFI / E2EE / QUIC）
+- 18~19 随开发阶段逐步补充（E2EE / QUIC）
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 

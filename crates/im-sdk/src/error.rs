@@ -58,7 +58,8 @@ mod tests {
     /// 每个定义过的码都必须有说明文字（非空、非占位）。
     #[test]
     fn every_defined_code_has_a_string() {
-        for code in [OK, ERR_INVALID_ARG, ERR_STOPPED, ERR_TIMEOUT, ERR_POLL_WITH_CALLBACK, ERR_INTERNAL]
+        for code in
+            [OK, ERR_INVALID_ARG, ERR_STOPPED, ERR_TIMEOUT, ERR_POLL_WITH_CALLBACK, ERR_INTERNAL]
         {
             assert!(!error_string(code).is_empty());
         }

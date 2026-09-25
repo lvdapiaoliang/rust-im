@@ -21,7 +21,7 @@
 //! 3. **字符串编码**：`env.get_string` 处理 UTF-16 → UTF-8 转换。
 //!    千万别用裸 `GetStringUTFChars`——它给的是 **modified UTF-8**
 //!    （NUL 用双字节编码、增补字符非标准），和真 UTF-8 不兼容，
-//!    是 JNI 最著名的陷阱（docs/20 §6.6）。
+//!    是 JNI 最著名的陷阱（docs/20 §5.7）。
 //!
 //! Java 侧源码：`java/im/sdk/Sdk.java`（绑定类）与 `java/im/sdk/Demo.java`
 //! （冒烟演示），冒烟步骤见 docs/17。
@@ -35,12 +35,12 @@ use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
 use jni::sys::{jbyteArray, jint, jlong, jobject, jstring};
 use jni::{JNIEnv, JavaVM};
 
-use crate::core::{ImSdkEvent, SdkClient, EventCallback};
+use crate::core::{EventCallback, ImSdkEvent, SdkClient};
 use crate::ffi::{
     im_sdk_client_create, im_sdk_client_destroy, im_sdk_client_poll_event, im_sdk_client_send,
-    im_sdk_event_free, im_sdk_error_string, str_from_c,
+    im_sdk_error_string, im_sdk_event_free, str_from_c,
 };
-use crate::{error, SDK_VERSION};
+use crate::{SDK_VERSION, error};
 
 /// JNI 句柄：Java 侧持有的 `long`。包住两个裸指针——
 /// `client`（C ABI 客户端）与 `callback_ctx`（回调模式的事件桥，可为 null）。
@@ -285,8 +285,8 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeSend(
     );
     if rc != error::OK {
         // SAFETY: 错误串是 SDK 静态字符串（NUL 结尾、进程常驻）
-        let msg = unsafe { str_from_c(im_sdk_error_string(rc)) }
-            .unwrap_or_else(|| "unknown".to_string());
+        let msg =
+            unsafe { str_from_c(im_sdk_error_string(rc)) }.unwrap_or_else(|| "unknown".to_string());
         let _ = env.throw_new("java/lang/RuntimeException", format!("send failed: {msg}"));
     }
 }
@@ -306,11 +306,8 @@ pub extern "system" fn Java_im_sdk_Sdk_nativePoll(
 
     let mut raw: *mut ImSdkEvent = ptr::null_mut();
     // 句柄契约同 send；out 指向栈上局部变量
-    let rc = im_sdk_client_poll_event(
-        handle.client,
-        &mut raw,
-        u32::try_from(timeout_ms).unwrap_or(0),
-    );
+    let rc =
+        im_sdk_client_poll_event(handle.client, &mut raw, u32::try_from(timeout_ms).unwrap_or(0));
     match rc {
         error::OK => {
             let event = build_java_event(&mut env, raw);
