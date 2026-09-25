@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-**阶段 0~8 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
+**阶段 0~9 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
 客户端消息级重传 + 自研本地库（LSM 思想）+ ratatui TUI，全链路 e2e 含崩溃重传场景；
 Web 接入与持久化（FrameSink 传输解耦、PostgreSQL + sqlx、axum REST、WS 网关
 JSON 信封协议、Vue 3 前端骨架），TCP/TUI 与 Web 双接入并存；好友系统全流程
@@ -13,7 +13,8 @@ TUI 对非 text 降级显示）已上线；群组系统（每群一个扇出 act
 + `try_send` 慢消费者隔离 + `not_member` 发送门槛）已上线，im-bench 实测单 actor
 吞吐 ~94 万人次/秒（2 万人单条 P50 ≈ 19ms，人均 ~1µs，见 docs/13）；
 1对1 音视频与远程桌面（WebRTC P2P：信令走 WS `signal` 信封不透明转发，
-媒体流端到端直连不经服务器，见 docs/14）已上线。
+媒体流端到端直连不经服务器，见 docs/14）；群会议与屏幕共享（LiveKit SFU：
+服务端手签 JWT 入会令牌 + is_member 门槛，媒体转发外包给 SFU，见 docs/15）已上线。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
@@ -26,7 +27,7 @@ TUI 对非 text 降级显示）已上线；群组系统（每群一个扇出 act
 | 6 | 好友系统全流程 + 富媒体消息（文件 / 表情） | ✅ |
 | 7 | 群组 + 2 万人同时在线（群扇出 + 慢消费者隔离） | ✅ |
 | 8 | 1对1 音视频 + 远程桌面（WebRTC P2P） | ✅ |
-| 9 | 群会议 + 屏幕共享（LiveKit SFU） | ⬜ |
+| 9 | 群会议 + 屏幕共享（LiveKit SFU） | ✅ |
 | 10 | 压测（10万 → 100万 → 500万连接三级里程碑） | ⬜ |
 | 11 | FFI SDK（C ABI 动态库 / JNI） | ⬜ |
 | 12 | 桌面端（Tauri）+ E2EE（Signal 协议） | ⬜ |
@@ -53,6 +54,9 @@ cargo run -p im-client 127.0.0.1:8888 1 demo    # 起 TUI 客户端（TCP 二进
 cd web
 npm install
 npm run dev                  # Vite 开发服务器（5173，代理 /api 与 /ws 到 8080）
+
+# 群会议（可选，需要 Docker）：起 LiveKit SFU，后端默认凭据零配置对接
+# docker compose -f deploy/docker-compose.yml up -d
 ```
 
 TUI 按键：`/to <user_id>` 新会话 · `Tab` 切换会话 · Enter 发送 ·
@@ -91,7 +95,8 @@ web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 ca
 - [12 - Web 协议：REST、WS JSON 信封、事件推送与富媒体内容](docs/12-web-protocol.md)（阶段 5~6）
 - [13 - 群消息扇出与 2 万人在线](docs/13-group-fanout.md)（阶段 7）
 - [14 - WebRTC 音视频与远程桌面](docs/14-webrtc.md)（阶段 8）
-- 15~19 随开发阶段逐步补充（会议 / 压测 / FFI / E2EE / QUIC）
+- [15 - 群会议与屏幕共享（LiveKit SFU）](docs/15-meeting.md)（阶段 9）
+- 16~19 随开发阶段逐步补充（压测 / FFI / E2EE / QUIC）
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 

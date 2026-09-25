@@ -64,7 +64,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 6 | 好友系统全流程 + 富媒体消息（文件 / 表情） | `im-server/src/web` + `web/` | 12 | ✅ 已完成 |
 | 7 | 群组 + 2 万人同时在线（群扇出 actor + 慢消费者隔离） | `im-server` + `im-bench` | 13 | ✅ 已完成 |
 | 8 | 1对1 音视频 + 远程桌面（WebRTC P2P，WS 信令） | `web/` + `im-server/src/web` | 14 | ✅ 已完成 |
-| 9 | 群会议 + 屏幕共享（LiveKit SFU + docker-compose） | `web/` + `im-server/src/web` | 15 | 未开始 |
+| 9 | 群会议 + 屏幕共享（LiveKit SFU + docker-compose） | `web/` + `im-server/src/web` | 15 | ✅ 已完成 |
 | 10 | 压测与三级性能里程碑 | `im-bench` | 16 | 未开始 |
 | 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | 未开始 |
 | 12 | 桌面端（Tauri）+ E2EE（Signal） | `im-client` + `im-crypto` | 18 | 未开始 |

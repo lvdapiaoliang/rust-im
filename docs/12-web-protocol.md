@@ -79,6 +79,7 @@ Authorization: Bearer <token>
 | GET /api/groups | 我的群 | Bearer |
 | POST /api/groups/{id}/members | 拉人入群（仅 owner；成功后扇出快照置脏，见 docs/13） | Bearer |
 | GET /api/groups/{id}/members | 成员视图列表（限群成员，阶段 7 前端群详情用） | Bearer |
+| POST /api/groups/{id}/meeting/token | 领会议入会令牌（限群成员，阶段 9，见 docs/15） | Bearer |
 | POST /api/files | 上传（multipart，落盘 `data/files/`） | Bearer |
 | GET /api/files/{id} | 带鉴权下载 | Bearer |
 | GET /ws?token=… | 升级为 WebSocket | query 令牌（见四） |
@@ -363,25 +364,20 @@ WS 集成测试用 `tokio-tungstenite` 做真客户端：不走 `FrameSink` 的
   拒绝）/ 连接中断（select 退出）。三种「失败」发生在三个层次，
   客户端要能分别感知——混为一谈的协议会让前端写出一堆猜谜代码。
 
-## 九、下一步（阶段 9 预告）
+## 九、下一步（阶段 10 预告）
 
-> 本节原为阶段 7 预告，阶段 7、8 均已完成，与实情的偏差校对如下：
-> 群扇出 actor / 慢消费者隔离 / 压测 / Vue 群聊界面均已落地
-> （详见 docs/13）；**未实现**：群内递增 seq、@提及、入群/退群
-> 通知（产品完整性欠账，见 docs/13 §七的账单）。阶段 8 预告说
-> 「信令新增 offer/answer/ICE 类型」——实情更省：**只加了一个
-> `signal` 上行类型**（载荷 `call` 标签判别，offer/answer/candidate/
-> hangup/reject 全在不透明的 signal 字段里），下行复用 `event`
-> 信封。不透明语义又一次把协议演进成本压到了最小（见 4.9 与
-> docs/14）。
+> 本节历经两次校对：原为阶段 7 预告，阶段 7、8 完成后校对过一次；
+> 本次（阶段 9 完成后）再校对——阶段 9 预告与实情**零偏差**
+> （LiveKit SFU、token 签发端点、屏幕共享回归普通 track、
+> docker-compose 与「本机无 Docker 诚实记录」全部兑现，见 docs/15）。
 
-文本与 1对1 实时媒体都闭环了，阶段 9 处理「一对多」的媒体——
-P2P 全连接（N×(N-1)/2 条管道）在 8 人会议就会把上行带宽打爆：
+社交功能矩阵（单聊/好友/群组/1对1 通话/群会议）闭环，回到性能
+主线——阶段 10 压测与三级性能里程碑：
 
-- 群会议 + 屏幕共享（LiveKit SFU：每人只上传一路，服务器选择性
-  转发；信令/鉴权/UI 复用已有骨架，服务器侧只加 token 签发端点）；
-- docker-compose 起 LiveKit（本机无 Docker 的环境限制会诚实记录）；
-- 屏幕共享从「通话的特殊形态」回归为「会议的一个普通 track」。
+- 10 万 → 100 万 → 500 万连接（连接风暴对传输层与会话层的极限考验）；
+- 阶段 7 已示范过方法论（im-bench 同构替换、账目纪律、多点对照），
+  阶段 10 把它从「群扇出单点」扩展到「全链路」；
+- 弱网模拟（100ms RTT + 10% 丢包）验证消息到达率 99.999% 的目标。
 
 ## 十、面试题与标准回答
 
@@ -460,3 +456,7 @@ WS 网关（JSON 信封 + 应用层心跳）、Vue 3 前端骨架（登录/会�
 *阶段 8 增补：`signal` 上行信封 + `peer_offline` 错误码 + `signal`
 事件（4.3 / 4.6 / 4.7 / 4.9 已更新）；拓扑分工（信令走 WS、媒体走
 P2P）与前端状态机详见 [docs/14-webrtc.md](14-webrtc.md)。*
+
+*阶段 9 增补：`POST /api/groups/{id}/meeting/token` 端点（上表已列）；
+JWT 手签（HMAC-SHA256 + base64url 零新依赖）、SFU 拓扑取舍与部署
+文件详见 [docs/15-meeting.md](15-meeting.md)。*
