@@ -114,7 +114,7 @@ pub extern "C" fn im_sdk_client_create(
     if let Some(cb) = callback {
         let events = client.take_events().expect("create 返回的客户端必然持有事件接收端");
         if let Ok(pump) = spawn_pump(events, cb, user_data) {
-            client.attach_pump(pump)
+            client.attach_pump(pump);
         } else {
             client.destroy();
             return std::ptr::null_mut();

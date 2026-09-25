@@ -15,7 +15,7 @@
 //!    `attach_current_thread()`（AttachGuard，drop 时自动 detach）。
 //!    每条事件 attach/detach 一次有成本，事件量大的 SDK 应换成
 //!    `attach_current_thread_permanently`（docs/17 已知取舍）。
-//! 2. **GlobalRef**：局部引用出不了它的原生调用帧——把 Java 回调对象
+//! 2. **`GlobalRef`**：局部引用出不了它的原生调用帧——把 Java 回调对象
 //!    存到泵线程用，必须 `new_global_ref`，并且**最终必须显式 delete**
 //!    （Java 侧 GC 不会替你管理 native 持有的全局引用）。
 //! 3. **字符串编码**：`env.get_string` 处理 UTF-16 → UTF-8 转换。
@@ -45,8 +45,8 @@ use crate::{SDK_VERSION, error};
 /// JNI 句柄：Java 侧持有的 `long`。包住两个裸指针——
 /// `client`（C ABI 客户端）与 `callback_ctx`（回调模式的事件桥，可为 null）。
 ///
-/// 拆开存的必要性：destroy 必须**先** join 事件泵（im_sdk_client_destroy
-/// 内部完成），**再**回收 callback_ctx——泵线程还活着时回收它就是
+/// 拆开存的必要性：destroy 必须**先** join `事件泵（im_sdk_client_destroy`
+/// 内部完成），**再**回收 `callback_ctx——泵线程还活着时回收它就是`
 /// use-after-free。句柄把两者绑在一起，Java 侧就无法弄错顺序。
 struct JniHandle {
     /// C ABI 客户端句柄（poll 与 send 都走它）。
@@ -55,9 +55,9 @@ struct JniHandle {
     callback_ctx: *mut c_void,
 }
 
-/// 事件桥：塞给 C 事件泵的 `user_data`——JavaVM + 回调对象的 GlobalRef。
+/// 事件桥：塞给 C 事件泵的 `user_data`——`JavaVM` + 回调对象的 `GlobalRef`。
 ///
-/// JavaVM 可以跨线程克隆传递（它就是为此设计的）；GlobalRef 是 JVM 里
+/// `JavaVM` 可以跨线程克隆传递（它就是为此设计的）；GlobalRef 是 JVM 里
 /// 唯一能被 native 长期持有的引用形态（局部引用出了原生帧就失效）。
 struct JniEventBridge {
     vm: JavaVM,
@@ -208,19 +208,13 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeCreate(
         (Some(jni_event_shim as EventCallback), Box::into_raw(bridge).cast::<c_void>())
     };
 
-    let addr_c = match std::ffi::CString::new(addr) {
-        Ok(c) => c,
-        Err(_) => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "addr contains NUL");
-            return 0;
-        }
+    let Ok(addr_c) = std::ffi::CString::new(addr) else {
+        let _ = env.throw_new("java/lang/IllegalArgumentException", "addr contains NUL");
+        return 0;
     };
-    let token_c = match std::ffi::CString::new(token) {
-        Ok(c) => c,
-        Err(_) => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "token contains NUL");
-            return 0;
-        }
+    let Ok(token_c) = std::ffi::CString::new(token) else {
+        let _ = env.throw_new("java/lang/IllegalArgumentException", "token contains NUL");
+        return 0;
     };
     let dir_c = data_dir.and_then(|d| std::ffi::CString::new(d).ok());
 
@@ -268,12 +262,11 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeSend(
     } else {
         // SAFETY: data 是 JVM 传入的合法 jbyteArray（方法签名由 JVM 保证类型）
         let arr = unsafe { JByteArray::from_raw(data) };
-        match env.convert_byte_array(&arr) {
-            Ok(v) => v,
-            Err(_) => {
-                let _ = env.throw_new("java/lang/RuntimeException", "convert_byte_array failed");
-                return;
-            }
+        if let Ok(v) = env.convert_byte_array(&arr) {
+            v
+        } else {
+            let _ = env.throw_new("java/lang/RuntimeException", "convert_byte_array failed");
+            return;
         }
     };
     // 句柄契约：nativeCreate 产出、close 之前、无并发 close
@@ -306,19 +299,21 @@ pub extern "system" fn Java_im_sdk_Sdk_nativePoll(
 
     let mut raw: *mut ImSdkEvent = ptr::null_mut();
     // 句柄契约同 send；out 指向栈上局部变量
-    let rc =
-        im_sdk_client_poll_event(handle.client, &mut raw, u32::try_from(timeout_ms).unwrap_or(0));
+    let rc = im_sdk_client_poll_event(
+        handle.client,
+        &raw mut raw,
+        u32::try_from(timeout_ms).unwrap_or(0),
+    );
     match rc {
         error::OK => {
             let event = build_java_event(&mut env, raw);
             // SAFETY: poll 成功即移交了所有权——拷贝完必须回收（谁分配谁释放）
             unsafe { im_sdk_event_free(raw) };
-            match event {
-                Some(obj) => obj.into_raw(),
-                None => {
-                    let _ = env.throw_new("java/lang/RuntimeException", "build Event failed");
-                    ptr::null_mut()
-                }
+            if let Some(obj) = event {
+                obj.into_raw()
+            } else {
+                let _ = env.throw_new("java/lang/RuntimeException", "build Event failed");
+                ptr::null_mut()
             }
         }
         // 超时不是异常：Java 侧拿到 null 表示「暂时没有事件」
@@ -336,7 +331,7 @@ pub extern "system" fn Java_im_sdk_Sdk_nativePoll(
 /// `Sdk.nativeClose(self)`：销毁客户端 + 回收事件桥。
 ///
 /// 顺序即安全：`im_sdk_client_destroy` 内部**先 join 事件泵**，泵确认
-/// 停了之后才回收 `callback_ctx`（GlobalRef 的 delete 也在这一步）。
+/// 停了之后才回收 `callback_ctx`（`GlobalRef` 的 delete 也在这一步）。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_im_sdk_Sdk_nativeClose(
     _env: JNIEnv<'_>,
