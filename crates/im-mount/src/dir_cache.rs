@@ -34,8 +34,11 @@ use crate::memfs::{DirEntry, MemFs};
 /// 多处共享同一份是安全的）。
 pub struct DirCache {
     cache: LruCache<String, Arc<[DirEntry]>>,
-    hits: u64,
-    misses: u64,
+    /// 命中/未命中计数。选 u32 不是 u64：`f64::from(u32)` 精确无损
+    /// （u64 会丢尾数，`as f64` 又要吃 clippy 的精度警告），饱和加法
+    /// 封顶 42 亿次——目录列举的观测计数够用十辈子。
+    hits: u32,
+    misses: u32,
 }
 
 impl DirCache {
@@ -47,20 +50,20 @@ impl DirCache {
 
     /// 命中次数（观测口径：真实文件系统也暴露这些计数给 perf 工具）。
     #[must_use]
-    pub fn hits(&self) -> u64 {
+    pub fn hits(&self) -> u32 {
         self.hits
     }
 
     /// 未命中次数。
     #[must_use]
-    pub fn misses(&self) -> u64 {
+    pub fn misses(&self) -> u32 {
         self.misses
     }
 
     /// 命中率（0.0~1.0；冷缓存 0/0 记作 0.0，不 NaN）。
     #[must_use]
     pub fn hit_rate(&self) -> f64 {
-        let total = self.hits + self.misses;
+        let total = self.hits.saturating_add(self.misses);
         if total == 0 {
             0.0
         } else {
@@ -76,10 +79,10 @@ impl DirCache {
     /// 不把错误缓存起来——**缓存的是结果，不是错误**）。
     pub fn read_dir(&mut self, fs: &MemFs, path: &str) -> Result<Arc<[DirEntry]>, FsError> {
         if let Some(entries) = self.cache.get(&path.to_string()) {
-            self.hits += 1;
+            self.hits = self.hits.saturating_add(1);
             return Ok(Arc::clone(entries));
         }
-        self.misses += 1;
+        self.misses = self.misses.saturating_add(1);
         let entries: Arc<[DirEntry]> = fs.read_dir(path)?.into();
         self.cache.put(path.to_string(), Arc::clone(&entries));
         Ok(entries)
@@ -113,7 +116,7 @@ impl CachedFs {
 
     /// 目录缓存观测（原样暴露，压测/调试用）。
     #[must_use]
-    pub fn cache_stats(&self) -> (u64, u64) {
+    pub fn cache_stats(&self) -> (u32, u32) {
         (self.dir_cache.hits(), self.dir_cache.misses())
     }
 

@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 /// 链表槽位：值 + 双向链表的 prev/next 下标。
+#[derive(Debug)]
 struct Slot<K, V> {
     key: K,
     value: V,
@@ -141,7 +142,8 @@ where
     /// # Panics
     ///
     /// 不 panic——但注意容量 0 的缓存会当场淘汰刚插入的条目
-    /// （返回值就是它自己），这个行为与 `lru` crate 一致。
+    /// （返回值就是它自己，测试 `zero_capacity_evicts_immediately`
+    /// 锁死这个行为），这个行为与 `lru` crate 一致。
     pub fn put(&mut self, key: K, value: V) -> Option<(K, V)> {
         // 已存在：更新值、提到表头（key 留在原槽位，新 key 直接丢弃）
         if let Some(&idx) = self.map.get(&key) {
@@ -150,13 +152,11 @@ where
             return None;
         }
 
-        // 满了先淘汰表尾（最久未用）
-        let mut evicted = None;
-        if self.map.len() >= self.capacity {
-            evicted = self.evict_tail();
-        }
-
-        // 空槽复用优先，否则尾部追加
+        // 插入新条目：空槽复用优先，否则尾部追加。
+        // （淘汰放在插入之后：容量 0 时刚插入的项自己就是表尾，
+        // 「插入即淘汰」自然发生；容量 n 时先到 n+1 再踢回 n，
+        // 两种情况同一条代码路径——先淘汰后插入在容量 0 时会落空，
+        // 这个边界用例当初就是这么写出来的）
         let idx = match self.free.pop() {
             Some(idx) => {
                 *self.slot_at(idx) = Some(Slot { key: key.clone(), value, prev: None, next: None });
@@ -169,6 +169,12 @@ where
         };
         self.push_front(idx);
         self.map.insert(key, idx);
+        // 超容 → 淘汰表尾（最久未用）
+        let evicted = if self.map.len() > self.capacity {
+            self.evict_tail()
+        } else {
+            None
+        };
         evicted
     }
 
@@ -256,7 +262,7 @@ where
         let slot = self.slot_at(tail).take()?;
         self.free.push(tail);
         self.map.remove(slot.key_ref());
-        Some((slot.into_pair()))
+        Some(slot.into_pair())
     }
 
     // ── 内部：slab 访问三弟兄（Option<Slot> 包着的下标访问）──

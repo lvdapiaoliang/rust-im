@@ -73,6 +73,7 @@ pub struct Attr {
 }
 
 /// FS 节点：目录（孩子表）或文件（数据），一个结构两态。
+#[derive(Debug)]
 struct Node {
     kind: NodeKind,
     /// 目录：文件名 → 子 inode。用 `BTreeMap` 不是为了性能——
@@ -269,14 +270,19 @@ impl MemFs {
         let node = self.node(ino)?;
         Ok(Attr {
             kind: node.kind,
-            size: node.data.len() as u64,
+            size: u64::try_from(node.data.len()).unwrap_or(u64::MAX),
             children: node.children.len(),
         })
     }
 
     /// 把路径拆成（父 inode，最后一段文件名）。根路径没有父——
     /// `mkdir("/")` 之类的操作在这里就报错。
-    fn split_parent(&self, path: &str) -> Result<(Ino, &str), FsError> {
+    ///
+    /// 返回的 `&str` 生命周期绑 **path**（不绑 `&self`）：它只是
+    /// 入参的切片，如果不显式标注，省略规则会把它绑到 `&self` 上，
+    /// 后续任何 `&mut self` 的操作（alloc/insert）都要与这个不可变
+    /// 借用打架——生命周期标注不是美学问题，是借用检查器的合同。
+    fn split_parent<'a>(&self, path: &'a str) -> Result<(Ino, &'a str), FsError> {
         let components = components(path).collect::<Vec<_>>();
         let (name, ancestors) = components
             .split_last()
