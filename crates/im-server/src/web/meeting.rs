@@ -28,7 +28,7 @@ const HMAC_BLOCK: usize = 64;
 /// 过长则失窃令牌的暴露窗口变大——与登录令牌 7 天是不同的权衡）。
 const MEETING_TOKEN_TTL: std::time::Duration = std::time::Duration::from_secs(2 * 3600);
 
-/// LiveKit 连接配置：全部可由环境变量覆盖，默认值即官方 docker-compose
+/// `LiveKit` 连接配置：全部可由环境变量覆盖，默认值即官方 docker-compose
 /// 的本地开发凭据（`devkey`/`secret`）——**零配置可跑通本机演示**，
 /// 生产换环境变量即可，代码不动。
 #[derive(Debug, Clone)]
@@ -63,7 +63,7 @@ impl LiveKitConfig {
 }
 
 /// 会议房间名：群 ID 派生（一群最多一间常驻会议室，不持久化——
-/// LiveKit 侧房间在最后一人离开后自动回收，我们的 DB 零新增表）。
+/// `LiveKit` 侧房间在最后一人离开后自动回收，我们的 DB 零新增表）。
 #[must_use]
 pub fn room_name(group_id: u64) -> String {
     format!("im-meeting-{group_id}")
@@ -71,10 +71,15 @@ pub fn room_name(group_id: u64) -> String {
 
 /// 签发入会令牌：标准三段 JWT（`header.payload.signature`）。
 ///
-/// `sub` 用用户 ID、`name` 用昵称（LiveKit 界面上显示的名字）；
-/// `video` 是 LiveKit 的授权载荷（grants）——`roomJoin` + 房间名 +
+/// `sub` 用用户 ID、`name` 用昵称（`LiveKit` 界面上显示的名字）；
+/// `video` 是 `LiveKit` 的授权载荷（`grants`）——`roomJoin` + 房间名 +
 /// 发布/订阅双许可。**授权在签名里完成**：SFU 只验签不放权，
-/// 「谁能进这间房」的裁决在我们服务端（is_member 门槛，见 api.rs）。
+/// 「谁能进这间房」的裁决在我们服务端（`is_member` 门槛，见 api.rs）。
+///
+/// # Panics
+///
+/// claims/header 序列化失败时 panic——载荷全是字符串与数字，
+/// `serde_json` 不会失败（这个 `expect` 与全项目「发号器保证」同款）。
 #[must_use]
 pub fn sign_meeting_token(
     cfg: &LiveKitConfig,
@@ -84,8 +89,7 @@ pub fn sign_meeting_token(
 ) -> String {
     let exp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
         + MEETING_TOKEN_TTL.as_secs();
 
     let header = json!({ "alg": "HS256", "typ": "JWT" });
@@ -149,7 +153,7 @@ fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
 /// base64url 编码（URL 安全字母表，无填充 `=`——JWT 规范要求）。
 fn b64url(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let bytes = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
         let word = (u32::from(bytes[0]) << 16) | (u32::from(bytes[1]) << 8) | u32::from(bytes[2]);
@@ -212,7 +216,7 @@ mod tests {
     }
 
     /// JWT 三段结构：解回 claims 验证 iss/sub/room/grants，且签名可复算。
-    /// （自签自验只证明确定性；与 LiveKit 的互认靠手工联调——文档里
+    /// （自签自验只证明确定性；与 `LiveKit` 的互认靠手工联调——文档里
     /// 记录了本机无 Docker 的验证缺口。）
     #[test]
     fn meeting_token_is_valid_jwt_shape() {
@@ -249,7 +253,11 @@ mod tests {
         assert_eq!(parts[2], expect);
     }
 
-    /// 标准字母表解码（测试专用——生产只签不解，验证是 LiveKit 的事）。
+    /// 标准字母表解码（测试专用——生产只签不解，验证是 `LiveKit` 的事）。
+    ///
+    /// 窄化转换全部安全：6 位值拼进 24 位窗口再按 8 位切——掩码之外
+    /// 没有位能进入高位，`u8` 永不截断到错误值。
+    #[allow(clippy::cast_possible_truncation)]
     fn base64_decode(input: &[u8]) -> Result<Vec<u8>, &'static str> {
         const ALPHABET: &[u8; 64] =
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";

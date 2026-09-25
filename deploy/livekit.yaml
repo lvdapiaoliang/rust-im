@@ -1,0 +1,25 @@
+# LiveKit 服务配置（被 deploy/docker-compose.yml 挂载）。
+# 字段含义见官方文档 https://docs.livekit.io/reference/server/config/
+# ——这里只留教学项目需要的最小集，全部字段都有可读注释。
+
+# 信令端口：前端 WebSocket 连这里（后端 IM_LIVEKIT_URL 默认 ws://127.0.0.1:7880）。
+port: 7880
+
+# 媒体转发配置：端口段与 compose 文件的映射一一对应。
+rtc:
+  tcp_port: 7881 # UDP 被防火墙拦时的兜底（会牺牲一点延迟）
+  port_range_start: 50000
+  port_range_end: 50100
+
+# TURN（P2P 时代的打洞中继）对 SFU 无意义：媒体本来就进服务器，
+# 不需要替谁中转——这是「换拓扑省掉一整类问题」的实例（docs/15）。
+# 生产环境若客户端在受限网络，仍建议配 TURN 给 WebRTC 数据通道用。
+
+# API 密钥对：与后端 meeting.rs 的默认值一致（devkey/secret）。
+# 生产必换强随机值——密钥即权力：持有 secret 就能替任何人签票进任意房间。
+keys:
+  devkey: secret
+
+# 房间无人后自动回收（一群一间会议室的「不持久化」语义靠它兑现）。
+room:
+  auto_create: true

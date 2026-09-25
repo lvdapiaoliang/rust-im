@@ -529,7 +529,7 @@ async fn list_group_members(
 ///
 /// 会议没有独立的发起/结束状态机——一群一间常驻会议室（room 名由
 /// 群 ID 派生），谁先带 token 进去谁就「开始」了会议；最后一人离开
-/// 后 LiveKit 自动回收房间。我们只裁决「**谁有资格领票**」（is_member
+/// 后 `LiveKit` 自动回收房间。我们只裁决「**谁有资格领票**」（`is_member`
 /// 点查——与消息门槛、成员列表同一纪律），之后的发布/订阅控制交给
 /// 令牌里的 grants。
 async fn meeting_token(
@@ -553,9 +553,9 @@ async fn meeting_token(
 /// 入会令牌响应：token + 连接地址 + 房间名（前端无脑直连，配置只在服务端）。
 #[derive(Debug, serde::Serialize)]
 pub struct MeetingTokenResp {
-    /// LiveKit 入会 JWT（2 小时有效）。
+    /// `LiveKit` 入会 JWT（2 小时有效）。
     pub token: String,
-    /// LiveKit 服务地址（`ws://` / `wss://`）。
+    /// `LiveKit` 服务地址（`ws://` / `wss://`）。
     pub url: String,
     /// 房间名（群 ID 派生）。
     pub room: String,

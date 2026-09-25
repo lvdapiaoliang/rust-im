@@ -1,0 +1,261 @@
+﻿cargo :     Checking im-server v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-server)
+所在位置 行:1 字符: 48
++ ... rojects\rust-im; cargo clippy -p im-server --all-targets 2>&1 | Out-F ...
++                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking im...ates\im-server):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: item in documentation is missing backticks
+  --> crates\im-server\src\web\mod.rs:19:7
+   |
+19 | //!   鎺堟潈瑁佸喅锛坕s_member锛夊湪 api 灞傦紱
+   |       ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+   = note: `-W clippy::doc-markdown` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::doc_markdown)]`
+help: try
+   |
+19 - //!   鎺堟潈瑁佸喅锛坕s_member锛夊湪 api 灞傦紱
+19 + //!   `鎺堟潈瑁佸喅锛坕s_member锛夊湪` api 灞傦紱
+   |
+
+warning: item in documentation is missing backticks
+   --> crates\im-server\src\web\api.rs:532:7
+    |
+532 | /// 鍚?LiveKit 鑷姩鍥炴敹鎴块棿銆傛垜浠彧瑁佸喅銆?*璋佹湁璧勬牸棰嗙エ**銆嶏紙is_member
+    |        ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+532 - /// 鍚?LiveKit 鑷姩鍥炴敹鎴块棿銆傛垜浠彧瑁佸喅銆?*璋佹湁璧勬牸棰嗙エ**銆嶏紙is_member
+532 + /// 鍚?`LiveKit` 鑷姩鍥炴敹鎴块棿銆傛垜浠彧瑁佸喅銆?*璋佹湁璧勬牸棰嗙エ**銆嶏紙is_member
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\im-server\src\web\api.rs:532:40
+    |
+532 | /// 鍚?LiveKit 鑷姩鍥炴敹鎴块棿銆傛垜浠彧瑁佸喅銆?*璋佹湁璧勬牸棰嗙エ**銆嶏紙is_member
+    |                                                              ^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+532 - /// 鍚?LiveKit 鑷姩鍥炴敹鎴块棿銆傛垜浠彧瑁佸喅銆?*璋佹湁璧勬牸棰嗙エ**銆嶏紙is_member
+532 + /// 鍚?LiveKit 鑷姩鍥炴敹鎴块棿銆傛垜浠彧瑁佸喅銆?*璋佹湁璧勬牸棰嗙エ**銆嶏紙`is_member`
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\im-server\src\web\api.rs:556:9
+    |
+556 |     /// LiveKit 鍏ヤ細 JWT锛? 灏忔椂鏈夋晥锛夈€?    |         ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+556 -     /// LiveKit 鍏ヤ細 JWT锛? 灏忔椂鏈夋晥锛夈€?556 +     /// `LiveKit` 鍏ヤ細 JWT锛? 灏忔椂鏈夋晥锛夈€?    |
+
+warning: item in documentation is missing backticks
+   --> crates\im-server\src\web\api.rs:558:9
+    |
+558 |     /// LiveKit 鏈嶅姟鍦板潃锛坄ws://` / `wss://`锛夈€?    |         ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+558 -     /// LiveKit 鏈嶅姟鍦板潃锛坄ws://` / `wss://`锛夈€?558 +     /// `LiveKit` 鏈嶅姟鍦板潃锛坄ws://` / `wss://`锛夈€?    |
+
+warning: item in documentation is missing backticks
+  --> crates\im-server\src\web\meeting.rs:31:5
+   |
+31 | /// LiveKit 杩炴帴閰嶇疆锛氬叏閮ㄥ彲鐢辩幆澧冨彉閲忚鐩栵紝榛樿鍊煎嵆瀹樻柟 docker-compose
+   |     ^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+31 - /// LiveKit 杩炴帴閰嶇疆锛氬叏閮ㄥ彲鐢辩幆澧冨彉閲忚鐩栵紝榛樿鍊煎嵆瀹樻柟 docker-compose
+31 + /// `LiveKit` 杩炴帴閰嶇疆锛氬叏閮ㄥ彲鐢辩幆澧冨彉閲忚鐩栵紝榛樿鍊煎嵆瀹樻柟 docker-compose
+   |
+
+warning: item in documentation is missing backticks
+  --> crates\im-server\src\web\meeting.rs:66:5
+   |
+66 | /// LiveKit 渚ф埧闂村湪鏈€鍚庝竴浜虹寮€鍚庤嚜鍔ㄥ洖鏀讹紝鎴戜滑鐨?DB 闆舵柊澧炶〃锛夈€?   |     ^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+66 - /// LiveKit 渚ф埧闂村湪鏈€鍚庝竴浜虹寮€鍚庤嚜鍔ㄥ洖鏀讹紝鎴戜滑鐨?DB 闆舵柊澧炶〃锛夈€?66 + /// `LiveKit` 渚ф埧闂村湪鏈€鍚庝竴浜虹寮€鍚庤嚜鍔ㄥ洖鏀讹紝鎴戜滑鐨?DB 闆舵柊澧炶〃锛
+夈€?   |
+
+warning: item in documentation is missing backticks
+  --> crates\im-server\src\web\meeting.rs:75:15
+   |
+75 | /// `video` 鏄?LiveKit 鐨勬巿鏉冭浇鑽凤紙grants锛夆€斺€擿roomJoin` + 鎴块棿鍚?+
+   |                ^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+75 - /// `video` 鏄?LiveKit 鐨勬巿鏉冭浇鑽凤紙grants锛夆€斺€擿roomJoin` + 鎴块棿鍚?+
+75 + /// `video` 鏄?`LiveKit` 鐨勬巿鏉冭浇鑽凤紙grants锛夆€斺€擿roomJoin` + 鎴块棿鍚?+
+   |
+
+warning: item in documentation is missing backticks
+  --> crates\im-server\src\web\meeting.rs:77:6
+   |
+77 | /// 銆岃皝鑳借繘杩欓棿鎴裤€嶇殑瑁佸喅鍦ㄦ垜浠湇鍔＄锛坕s_member 闂ㄦ锛岃 api.rs锛夈€?   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+77 - /// 銆岃皝鑳借繘杩欓棿鎴裤€嶇殑瑁佸喅鍦ㄦ垜浠湇鍔＄锛坕s_member 闂ㄦ锛岃 api.rs锛夈€?77 + /// 銆宍璋佽兘杩涜繖闂存埧銆嶇殑瑁佸喅鍦ㄦ垜浠湇鍔＄锛坕s_member` 闂ㄦ锛岃 ap
+i.rs锛夈€?   |
+
+warning: docs for function which may panic missing `# Panics` section
+   --> crates\im-server\src\web\meeting.rs:79:1
+    |
+ 79 | / pub fn sign_meeting_token(
+ 80 | |     cfg: &LiveKitConfig,
+ 81 | |     user_id: u64,
+ 82 | |     display_name: &str,
+ 83 | |     room: &str,
+ 84 | | ) -> String {
+    | |___________^
+    |
+note: first possible panic found here
+   --> crates\im-server\src\web\meeting.rs:106:26
+    |
+106 |     let payload = b64url(serde_json::to_string(&claims).expect("JSON 杞借嵎鍙簭鍒楀寲").as_bytes());
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#missing_panics
+_doc
+    = note: `-W clippy::missing-panics-doc` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::missing_panics_doc)]`
+
+warning: called `map(<f>).unwrap_or(<a>)` on a `Result` value
+  --> crates\im-server\src\web\meeting.rs:85:15
+   |
+85 |       let exp = std::time::SystemTime::now()
+   |  _______________^
+86 | |         .duration_since(std::time::UNIX_EPOCH)
+87 | |         .map(|d| d.as_secs())
+88 | |         .unwrap_or(0)
+   | |_____________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#map_unwrap_or
+   = note: `-W clippy::map-unwrap-or` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::map_unwrap_or)]`
+help: use `map_or(<a>, <f>)` instead
+   |
+87 -         .map(|d| d.as_secs())
+88 -         .unwrap_or(0)
+87 +         .map_or(0, |d| d.as_secs())
+   |
+
+warning: manually reimplementing `div_ceil`
+   --> crates\im-server\src\web\meeting.rs:152:41
+    |
+152 |     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    |                                         ^^^^^^^^^^^^^^^^^^^^ help: consider using `.div_ceil()`: `data.len().div_
+ceil(3)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_div_cei
+l
+    = note: `-W clippy::manual-div-ceil` implied by `-W clippy::all`
+    = help: to override `-W clippy::all` add `#[allow(clippy::manual_div_ceil)]`
+
+warning: `im-server` (lib) generated 12 warnings (run `cargo clippy --fix --lib -p im-server -- ` to apply 11 suggestio
+ns)
+warning: item in documentation is missing backticks
+   --> crates\im-server\src\web\meeting.rs:215:23
+    |
+215 |     /// 锛堣嚜绛捐嚜楠屽彧璇佹槑纭畾鎬э紱涓?LiveKit 鐨勪簰璁ら潬鎵嬪伐鑱旇皟鈥斺€旀枃妗ｉ噷
+    |                                    ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+215 -     /// 锛堣嚜绛捐嚜楠屽彧璇佹槑纭畾鎬э紱涓?LiveKit 鐨勪簰璁ら潬鎵嬪伐鑱旇皟鈥斺€旀枃妗ｉ噷
+215 +     /// 锛堣嚜绛捐嚜楠屽彧璇佹槑纭畾鎬э紱涓?`LiveKit` 鐨勪簰璁ら潬鎵嬪伐鑱旇皟鈥斺€旀枃妗ｉ噷
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\im-server\src\web\meeting.rs:252:34
+    |
+252 |     /// 鏍囧噯瀛楁瘝琛ㄨВ鐮侊紙娴嬭瘯涓撶敤鈥斺€旂敓浜у彧绛句笉瑙ｏ紝楠岃瘉鏄?LiveKit 鐨勪簨锛夈€?    |                                                
+        ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+252 -     /// 鏍囧噯瀛楁瘝琛ㄨВ鐮侊紙娴嬭瘯涓撶敤鈥斺€旂敓浜у彧绛句笉瑙ｏ紝楠岃瘉鏄?LiveKit 鐨勪簨锛夈€?252 +     /// 鏍囧噯瀛楁瘝琛ㄨВ鐮侊紙娴嬭瘯涓撶敤鈥斺€旂敓浜у彧绛句笉瑙ｏ紝楠岃瘉鏄?`L
+iveKit` 鐨勪簨锛夈€?    |
+
+warning: casting `usize` to `u8` may truncate the value
+   --> crates\im-server\src\web\meeting.rs:262:23
+    |
+262 |             vals.push(v as u8);
+    |                       ^^^^^^^
+    |
+    = help: if this is intentional allow the lint with `#[allow(clippy::cast_possible_truncation)]` ...
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cast_possible_
+truncation
+    = note: `-W clippy::cast-possible-truncation` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::cast_possible_truncation)]`
+help: ... or use `try_from` and handle the error accordingly
+    |
+262 -             vals.push(v as u8);
+262 +             vals.push(u8::try_from(v));
+    |
+
+warning: casting `u32` to `u8` may truncate the value
+   --> crates\im-server\src\web\meeting.rs:270:22
+    |
+270 |             out.push((word >> 16) as u8);
+    |                      ^^^^^^^^^^^^^^^^^^
+    |
+    = help: if this is intentional allow the lint with `#[allow(clippy::cast_possible_truncation)]` ...
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cast_possible_
+truncation
+help: ... or use `try_from` and handle the error accordingly
+    |
+270 -             out.push((word >> 16) as u8);
+270 +             out.push(u8::try_from(word >> 16));
+    |
+
+warning: casting `u32` to `u8` may truncate the value
+   --> crates\im-server\src\web\meeting.rs:272:26
+    |
+272 |                 out.push((word >> 8) as u8);
+    |                          ^^^^^^^^^^^^^^^^^
+    |
+    = help: if this is intentional allow the lint with `#[allow(clippy::cast_possible_truncation)]` ...
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cast_possible_
+truncation
+help: ... or use `try_from` and handle the error accordingly
+    |
+272 -                 out.push((word >> 8) as u8);
+272 +                 out.push(u8::try_from(word >> 8));
+    |
+
+warning: casting `u32` to `u8` may truncate the value
+   --> crates\im-server\src\web\meeting.rs:275:26
+    |
+275 |                 out.push(word as u8);
+    |                          ^^^^^^^^^^
+    |
+    = help: if this is intentional allow the lint with `#[allow(clippy::cast_possible_truncation)]` ...
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cast_possible_
+truncation
+help: ... or use `try_from` and handle the error accordingly
+    |
+275 -                 out.push(word as u8);
+275 +                 out.push(u8::try_from(word));
+    |
+
+warning: `im-server` (lib test) generated 18 warnings (12 duplicates) (run `cargo clippy --fix --lib -p im-server --tes
+ts -- ` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.57s

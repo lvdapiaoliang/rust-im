@@ -99,6 +99,11 @@ function toChat(groupId: string): void {
   void router.push({ name: 'chat' })
 }
 
+/** 进入群会议（阶段 9）：领票在 MeetingView 内做，非成员会在那收到 403。 */
+function toMeeting(groupId: string): void {
+  void router.push({ name: 'meeting', params: { groupId } })
+}
+
 onMounted(async () => {
   try {
     await chat.loadContacts()
@@ -148,6 +153,7 @@ onMounted(async () => {
         </div>
         <div class="actions">
           <button class="primary" @click="toChat(g.id)">发消息</button>
+          <button class="primary" @click="toMeeting(g.id)">会议</button>
           <button @click="open(g.id)">成员</button>
         </div>
       </div>

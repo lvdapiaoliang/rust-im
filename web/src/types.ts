@@ -161,3 +161,17 @@ export interface SignalEvent {
   from: string
   signal: CallSignal
 }
+
+/**
+ * 入会令牌（阶段 9，POST /api/groups/{id}/meeting/token 响应）：
+ * LiveKit 连接三件套——服务端签发 JWT，前端无脑直连。
+ * 「谁有资格领票」由服务端 is_member 裁决，配置不泄漏到前端。
+ */
+export interface MeetingTicket {
+  /** 入会 JWT（2 小时有效，HS256 手签见后端 meeting.rs）。 */
+  token: string
+  /** LiveKit 服务地址（ws:// 或 wss://）。 */
+  url: string
+  /** 房间名（群 ID 派生：一群一间常驻会议室）。 */
+  room: string
+}

@@ -1,0 +1,30 @@
+# LiveKit SFU（阶段 9 群会议的媒体转发面）本地部署。
+#
+# 用法（装了 Docker 的机器）：
+#   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml ps     # 确认 healthy
+#
+# 起来后 im-server 零改动即可对接：后端默认签 devkey/secret 的票，
+# 前端默认连 ws://127.0.0.1:7880（见 crates/im-server/src/web/meeting.rs
+# 的环境变量覆盖点——生产换 IM_LIVEKIT_* 三个变量即可，代码不动）。
+#
+# 媒体端口段只映射了 50000-50100/udp：本机演示够用（每个订阅者占
+# 一个端口）；真实部署请去掉端口段映射、给容器直接用 host 网络
+# 或按官方文档配 RTC 端口段，并顺手把 keys 换成强随机值。
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    ports:
+      - "7880:7880" # WS 信令（前端连接口，与 IM_LIVEKIT_URL 对应）
+      - "7881:7881" # RTC over TCP（UDP 打洞失败时的兜底路径）
+      - "50000-50100:50000-50100/udp" # RTP/UDP 媒体端口段
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7880"]
+      interval: 5s
+      timeout: 3s
+      retries: 3

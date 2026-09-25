@@ -26,6 +26,12 @@ const router = createRouter({
       name: 'groups',
       component: () => import('@/views/GroupsView.vue'),
     },
+    {
+      // 会议页（阶段 9）：路径参数即群 ID——一群一间常驻会议室
+      path: '/meeting/:groupId',
+      name: 'meeting',
+      component: () => import('@/views/MeetingView.vue'),
+    },
   ],
 })
 
