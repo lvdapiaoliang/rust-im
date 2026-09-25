@@ -339,7 +339,7 @@ mod tests {
             .block_on(async { im_server::spawn_server(SessionConfig::default()).await })
             .expect("测试服务端应能启动");
         let addr = CString::new(addr.to_string()).unwrap();
-        let token = CString::new("t").unwrap();
+        let token = CString::new("demo").unwrap(); // SessionConfig::default 的静态口令
 
         // C 形态的回调：extern "C" + user_data——把事件拷贝进 std 通道
         // （回调里立即拷贝，正是「作用域契约」的模范履行）
