@@ -49,11 +49,7 @@ pub const fn error_string(code: i32) -> &'static str {
         // 直接 `i32 as usize` 是先截断后扩展，负数会回绕成巨大下标。
         // 负数守卫不可省：-3 的 abs 是 3，会假性地命中合法下标！
         let idx = code.unsigned_abs() as usize;
-        if idx < STRINGS.len() {
-            STRINGS[idx]
-        } else {
-            "unknown error code"
-        }
+        if idx < STRINGS.len() { STRINGS[idx] } else { "unknown error code" }
     } else {
         "unknown error code"
     }

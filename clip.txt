@@ -1,26 +1,13 @@
-﻿cargo :     Checking im-transport v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-transport)
+﻿cargo :     Checking im-server v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-server)
 所在位置 行:1 字符: 22
 + ...  cargo fmt --all; cargo clippy --workspace --all-targets 2>&1 | Out-F ...
 +                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (    Checking im...s\im-transport):String) [], RemoteException
+    + CategoryInfo          : NotSpecified: (    Checking im...ates\im-server):String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
-    Checking im-client v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-client)
-    Checking im-server v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-server)
+    Checking im-transport v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-transport)
     Checking im-storage v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-storage)
     Checking im-sdk v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-sdk)
+    Checking im-client v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-client)
     Checking im-bench v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-bench)
-warning: consider adding a `;` to the last statement for consistent formatting
-   --> crates\im-sdk\src\ffi.rs:117:13
-    |
-117 |             client.attach_pump(pump)
-    |             ^^^^^^^^^^^^^^^^^^^^^^^^ help: add a `;` here: `client.attach_pump(pump);`
-    |
-    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#semicolon_if_n
-othing_returned
-    = note: `-W clippy::semicolon-if-nothing-returned` implied by `-W clippy::pedantic`
-    = help: to override `-W clippy::pedantic` add `#[allow(clippy::semicolon_if_nothing_returned)]`
-
-warning: `im-sdk` (lib) generated 1 warning (run `cargo clippy --fix --lib -p im-sdk -- ` to apply 1 suggestion)
-warning: `im-sdk` (lib test) generated 1 warning (1 duplicate)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.16s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.37s
