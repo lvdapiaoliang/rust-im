@@ -613,18 +613,18 @@ ANSI/GBK 解码（PS 7+ 才默认 UTF-8）——中文的 UTF-8 字节被按 GBK
 跨编码边界的两条铁律：输出重定向到文件再读（§6.2），输入用码位
 构造（本条）。
 
-### 6.7 GitHub service container 只支持 Linux runner：放进三平台矩阵，windows/macos 腿直接失败【阶段 14 CI】
+### 6.7 GitHub service container 只支持 Linux runner：放进三平台矩阵，windows/macos 平台直接失败【阶段 14 CI】
 
 **现象**：ci.yml 里 `test` job 用 `matrix.os: [ubuntu, windows, macos]`
 三平台跑测试，为兑现「CI 配真库补盲区」在 job 级别挂了
 `services: postgres`。本地 YAML 校验、`cargo test` 全绿，push 后
-Actions 上 windows/macos 两条腿**在跑任何 step 之前就失败**：
+Actions 上 windows/macos 两个平台**在跑任何 step 之前就失败**：
 windows 报 `Container operations are only supported on Linux runners`，
 macos 报 `docker: command not found`。
 
 **根因**：GitHub 的 service container 依赖 Docker，而**托管 runner 里
 只有 Linux 提供 Docker**——windows/macos runner 根本没有容器运行时。
-`services:` 是 **job 级别**的键，被 matrix 每条腿无条件继承；它不是
+`services:` 是 **job 级别**的键，被 matrix 每个平台无条件继承；它不是
 「连不上就优雅跳过」，而是 job 启动阶段拉容器就报错，**整个 job 直接挂**
 （比测试失败更早，连 checkout 都到不了）。
 
@@ -635,7 +635,7 @@ macos 报 `docker: command not found`。
 
 **教训**：这与 §6.4（本机无 Docker）是同一个物理约束的两张面孔——
 **容器 = Linux 专属运行时**。凡「配了容器/service」的 CI 步骤，默认只在
-Linux runner 成立；跨平台矩阵里挂 service，等于给非 Linux 腿判死刑。
+Linux runner 成立；跨平台矩阵里挂 service，等于给非 Linux 平台判死刑。
 CI 配置的「本地全绿」只证明 YAML 合法 + 命令能跑，**证明不了 runner
 平台能力**——这正是 §6.4「诚实记录未实机验证」纪律要防的盲区，push 后
 WebFetch Actions 页面才抓出来。
@@ -774,7 +774,7 @@ E0599，同款根因不同 crate）、PowerShell 5.1 按 ANSI 读 UTF-8 无 BOM
 脚本（§6.6）、并行集成测试共用默认 `machine_id` 撞雪花 ID（§4.8——
 CI 落地抓出的第一个真 bug）、GitHub Actions 实机验证抓出的三个配置
 缺陷（§6.7——① service container 只支持 Linux runner，三平台矩阵挂
-postgres service 让 windows/macos 腿启动即失败，已拆 job 修复；② pages.yml
+postgres service 让 windows/macos 平台启动即失败，已拆 job 修复；② pages.yml
 的 action 名写成 `peaceiris/action-mdbook` 少个 s，报 repository not found，
 已改 `actions-mdbook`；③ Pages 未开启，configure-pages 报 Get Pages site
 failed，enablement:true 又报 Resource not accessible by integration——首开 Pages
