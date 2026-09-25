@@ -175,14 +175,20 @@ async fn accept_loop(
         // 同一次运行内各连接的丢包序列互不相同，但整场实验仍可复现
         let up = LinkCfg { seed: up_cfg.seed ^ (conn_seq << 1), ..up_cfg };
         let down = LinkCfg { seed: down_cfg.seed ^ (conn_seq << 1) ^ 1, ..down_cfg };
-        spawn_direction(client, server, up, down, &stats);
+        // 每个socket 只拆一次半部：上行拿"客户端读 → 服务端写"，
+        // 下行拿"服务端读 → 客户端写"——两对泵合起来恰好持有全部半部
+        // （谁都不能提前 drop 对方的半部）
+        let (client_read, client_write) =
+            Connection::with_max_frame_len(client, DEFAULT_MAX_FRAME_LEN).into_split();
+        let (server_read, server_write) =
+            Connection::with_max_frame_len(server, DEFAULT_MAX_FRAME_LEN).into_split();
+        spawn_pump(client_read, server_write, up, &stats.up);
+        spawn_pump(server_read, client_write, down, &stats.down);
     }
 }
 
 /// 架起一个方向：读侧 task（注入丢包/算到达时刻）+ 调度侧 task（按时出队写出）。
-fn spawn_direction(from: TcpStream, to: TcpStream, cfg: LinkCfg, stats: &LinkStats) {
-    let reader = Connection::with_max_frame_len(from, DEFAULT_MAX_FRAME_LEN).into_split().0;
-    let writer = Connection::with_max_frame_len(to, DEFAULT_MAX_FRAME_LEN).into_split().1;
+fn spawn_pump(reader: ReadHalf, writer: WriteHalf, cfg: LinkCfg, stats: &LinkStats) {
     let (tx, rx) = mpsc::channel::<(Frame, tokio::time::Instant)>(256);
     tokio::spawn(pump_in(reader, tx, cfg, stats));
     tokio::spawn(pump_out(rx, writer, stats));
