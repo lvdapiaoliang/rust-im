@@ -6,13 +6,13 @@
 #   test          —— 三平台构建/测试矩阵（不配数据库）：
 #     * 验证 ubuntu / windows(MSVC) / macos(aarch64-apple) 三条工具链
 #       都能一键构建并通过全量测试——rustls 钉 ring 的「能被任何人
-#       一键构建」主张，Windows 是最容易断的那条腿；
-#     * 三条腿都不配数据库，web 模块的 DB 测试按 pool_or_skip 设计
+#       一键构建」主张，其中 Windows 平台的兼容性最容易出问题；
+#     * 三个平台都不配数据库，web 模块的 DB 测试按 pool_or_skip 设计
 #       空转跳过（2s 连接超时后 skip，不误报，见 im-server db.rs）。
 #   test-postgres —— ubuntu 专跑数据库测试：
 #     * GitHub 的 service container 仅支持 Linux runner，真库只能挂在
 #       ubuntu job 上——早期把 services 放进三平台矩阵会让 windows/macos
-#       两条腿直接失败（非 Linux runner 不支持容器操作），故拆分；
+#       两个平台直接失败（非 Linux runner 不支持容器操作），故拆分；
 #     * 这里配 PostgreSQL service + DATABASE_URL，pool_or_skip 拿到真池，
 #       兑现阶段 5 立的账：本地无库空转保绿，CI 配真库补盲区。
 name: CI
@@ -69,7 +69,7 @@ jobs:
       - run: cargo run -p im-server --example quic_demo
 
   # ubuntu 专跑数据库测试：service container 仅支持 Linux runner，真库只能
-  # 挂在这里（不能进上面三平台矩阵，否则 windows/macos 两条腿会直接失败）
+  # 挂在这里（不能进上面三平台矩阵，否则 windows/macos 两个平台会直接失败）
   test-postgres:
     name: Test (postgres @ ubuntu)
     runs-on: ubuntu-latest
