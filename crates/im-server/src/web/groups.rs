@@ -51,6 +51,20 @@ pub struct MyGroup {
     pub role: String,
 }
 
+/// 群成员视图（阶段 7 前端群聊界面用：ID + 名字 + 角色）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GroupMember {
+    /// 成员用户 ID。
+    #[serde(serialize_with = "serde_id::serialize")]
+    pub id: u64,
+    /// 登录名。
+    pub username: String,
+    /// 展示名。
+    pub display_name: String,
+    /// 群内角色：`owner` / `member`。
+    pub role: String,
+}
+
 // 手写 FromRow：同 account::User，i64 → u64 的边界收敛在仓储层。
 impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for Group {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
@@ -161,7 +175,10 @@ impl GroupStore {
 
     /// 群是否存在（WS 消息权限分流：单聊要好友关系，群聊只要群存在）。
     ///
-    /// 阶段 6 每条消息一次点查；阶段 7 群 actor 上线后换成员快照缓存。
+    /// 阶段 6 每条消息一次点查；阶段 7 群 actor 上线后，扇出路径已
+    /// 换成员快照缓存，但**发送门槛**仍是每消息一次点查（见
+    /// [`GroupStore::is_member`]）——门槛要防「知道群 ID 就能发言」，
+    /// 快照在 actor 肚子里，门槛查不到它。
     ///
     /// # Errors
     ///
@@ -172,6 +189,72 @@ impl GroupStore {
             .fetch_optional(&self.pool)
             .await?;
         Ok(found.is_some())
+    }
+
+    /// 全量成员 ID（阶段 7 扇出 actor 的快照装载，按 `user_id` 升序）。
+    ///
+    /// 一次查全表而不逐个 `is_member`：扇出是「一封信抄给所有人」，
+    /// 2 万人点查 = 2 万次往返；快照只装载一次，之后全部扇出吃缓存。
+    ///
+    /// # Errors
+    ///
+    /// 数据库错误（见 [`GroupError::Db`]）。
+    pub async fn list_members(&self, group_id: u64) -> Result<Vec<u64>, GroupError> {
+        let rows: Vec<i64> = sqlx::query_scalar(
+            "SELECT user_id FROM group_members WHERE group_id = $1 ORDER BY user_id",
+        )
+        .bind(id_i64(group_id))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(id_u64).collect())
+    }
+
+    /// 是否群成员（阶段 7 群消息门槛：非成员不能往群里发）。
+    ///
+    /// 与 [`GroupStore::is_group`] 同为每消息一次主键点查（本地回环 PG
+    /// 微秒级）；门槛不能用 actor 快照——快照是扇出的私产，且未孵化
+    /// actor 的群没有快照可查。
+    ///
+    /// # Errors
+    ///
+    /// 数据库错误（见 [`GroupError::Db`]）。
+    pub async fn is_member(&self, group_id: u64, user_id: u64) -> Result<bool, GroupError> {
+        let found: Option<i64> = sqlx::query_scalar(
+            "SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = $2",
+        )
+        .bind(id_i64(group_id))
+        .bind(id_i64(user_id))
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(found.is_some())
+    }
+
+    /// 成员视图列表（阶段 7 前端群成员展示；联 users 表取名字）。
+    ///
+    /// # Errors
+    ///
+    /// 数据库错误（见 [`GroupError::Db`]）。
+    pub async fn list_member_users(&self, group_id: u64) -> Result<Vec<GroupMember>, GroupError> {
+        let rows = sqlx::query_as::<_, (i64, String, String, String)>(
+            "SELECT u.id, u.username, u.display_name, m.role
+             FROM group_members m
+             JOIN users u ON u.id = m.user_id
+             WHERE m.group_id = $1
+             ORDER BY u.id",
+        )
+        .bind(id_i64(group_id))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, username, display_name, role)| GroupMember {
+                id: id_u64(id),
+                username,
+                display_name,
+                role,
+            })
+            .collect())
     }
 
     /// 我加入的群（含自建）。

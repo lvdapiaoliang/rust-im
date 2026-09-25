@@ -37,6 +37,22 @@ use im_transport::{ConnectionHandle, TransportError};
 /// [`FrameSink::send`] 的返回形态：装箱 future，让 trait 可作 `dyn` 对象。
 pub type SendFuture<'a> = Pin<Box<dyn Future<Output = Result<(), TransportError>> + Send + 'a>>;
 
+/// [`FrameSink::try_send`] 的失败形态（非阻塞投递的两种“不可投”）。
+///
+/// 两个变体的后续处置完全不同——这是阶段 7 扇出路径的核心决策依据：
+/// - [`TrySendError::Full`]：出站通道满 = **慢消费者**（对端不读，缓冲打满）。
+///   扇出路径应该**跳过**它而不是等它——一个人慢不能拖慢全群
+///   （队头阻塞隔离）；
+/// - [`TrySendError::Closed`]：连接已死。扇出路径与单聊 [`TransportError::Closed`]
+///   同处置——**降级离线**（“消息不丢”优先于“状态新鲜”）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrySendError {
+    /// 出站通道满（慢消费者）：调用方跳过该接收者。
+    Full,
+    /// 连接已死：调用方可降级离线。
+    Closed,
+}
+
 /// 帧发送端：向「这条连接的对端」送出一帧的唯一抽象。
 ///
 /// 实现方必须保证：多个 task 并发 `send` 不会交错帧字节（TCP 侧由写
@@ -70,12 +86,41 @@ pub trait FrameSink: Send + Sync + Debug {
         // 默认实现 = 本传输不支持：装箱一个立即失败的 future
         Box::pin(async { Err(TransportError::Closed) })
     }
+
+    /// **非阻塞**投递一帧：通道满时立即返回 [`TrySendError::Full`]，
+    /// 绝不挂起。
+    ///
+    /// 需求背景（阶段 7 群扇出）：一条群消息要送达 2 万个接收者，
+    /// 其中任何一个慢消费者（出站通道打满）都会把 `send` 的
+    /// “满则挂起”变成**全群反压**——扇出 actor 卡在对一个人 `await`，
+    /// 其余 19999 人跟着排队。`try_send` 把“等不等”的决定权交回
+    /// 扇出路径：跳过慢的，继续扇出。
+    ///
+    /// 默认实现报 `Full`（不支持非阻塞的传输按慢消费者处理）——
+    /// 与 `send_text` 的“默认拒绝”同一手法：能力即协议，
+    /// 调用方据返回值分流，不猜。
+    ///
+    /// # Errors
+    ///
+    /// 通道满返回 [`TrySendError::Full`]；连接已死返回 [`TrySendError::Closed`]。
+    fn try_send(&self, frame: Frame) -> Result<(), TrySendError> {
+        let _ = frame;
+        Err(TrySendError::Full)
+    }
 }
 
 impl FrameSink for ConnectionHandle {
     fn send(&self, frame: Frame) -> SendFuture<'_> {
         // 适配器：固有异步方法 → 装箱 future（借用 self，生命周期自然对齐）
         Box::pin(ConnectionHandle::send(self, frame))
+    }
+
+    fn try_send(&self, frame: Frame) -> Result<(), TrySendError> {
+        // TCP 写 actor 的通道原生支持非阻塞：满 = 慢消费者，关 = 连接死亡
+        ConnectionHandle::try_send(self, frame).map_err(|e| match e {
+            tokio::sync::mpsc::error::TrySendError::Full(_) => TrySendError::Full,
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => TrySendError::Closed,
+        })
     }
 }
 

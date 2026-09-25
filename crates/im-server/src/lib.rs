@@ -17,8 +17,9 @@ pub mod web;
 
 pub use router::{Router, RouterError};
 pub use session::{
-    AllowAll, Authenticator, DEFAULT_MAX_OFFLINE_PER_USER, DEFAULT_SYNC_BATCH, SessionConfig,
-    SessionHandle, Sessions, StaticToken, serve, serve_connection, spawn_server,
+    AllowAll, Authenticator, DEFAULT_MAX_OFFLINE_PER_USER, DEFAULT_SYNC_BATCH, FanoutOutcome,
+    GroupRouter, RouteFuture, SessionConfig, SessionHandle, Sessions, StaticToken, serve,
+    serve_connection, spawn_server,
 };
-pub use sink::{FrameSink, SendFuture};
+pub use sink::{FrameSink, SendFuture, TrySendError};
 pub use snowflake::{Snowflake, SnowflakeError, SystemClock};

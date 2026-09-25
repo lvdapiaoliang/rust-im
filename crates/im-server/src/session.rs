@@ -24,7 +24,10 @@
 //!
 //! 路由的本质是**查表**（`user_id → 连接`），而查表已被 `Router`
 //! 分片并发化——任何会话 task 都能就地路由，无需排队经过中央 task。
-//! 中央总线在「扇出/顺序性保证」时才有价值（阶段 6 群聊再评估）。
+//! 中央总线在「扇出/顺序性保证」时才有价值——阶段 7 的结论是
+//! **不搞全局总线，搞每群一个扇出 actor**（`web::fanout`）：
+//! 顺序性只需在群内成立（每群一个 actor 天然串行），
+//! 而群与群之间的隔离恰好是全局总线最不擅长的。
 //!
 //! # 模式落点
 //!
@@ -38,9 +41,11 @@
 //!   挑战-应答时只换实现，会话层不动）。
 
 use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
@@ -53,7 +58,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use crate::router::{Router, RouterError};
-use crate::sink::FrameSink;
+use crate::sink::{FrameSink, TrySendError};
 use crate::snowflake::{Snowflake, SnowflakeError, SystemClock};
 
 /// 每用户离线消息上限（默认值）：超出丢最老的（内存保护的取舍）。
@@ -100,6 +105,33 @@ impl Authenticator for AllowAll {
         true
     }
 }
+
+// ────────────────────────────────────────────────────────────────
+// 群消息路由（阶段 7 依赖注入）
+// ────────────────────────────────────────────────────────────────
+
+/// 群消息路由策略：判定 `to` 是否群，是则接管扇出。
+///
+/// 会话核心**不感知「群」**——群是 DB 里的关系数据，扇出是每群一个
+/// actor 的结构（`web::fanout`）；本 trait 把两者从会话核心抽走。
+/// 与 [`Authenticator`] 同一手法：核心定契约、外面换实现——
+/// TCP/WS 两条接入路径的 `handle_msg` 因此零改动地获得群能力。
+///
+/// 为什么不在 `handle_msg` 里直接查库：会话核心至今没有 DB 依赖
+/// （离线队列是内存版、认证是 trait）——为群破例会让所有
+/// 纯内存测试（本文件 20+ 个）背上一个 PG 依赖。
+pub trait GroupRouter: Send + Sync {
+    /// 尝试按群路由一条消息。
+    ///
+    /// 返回 `true` = `to` 是群、扇出路径已接管（消息级 Ack 照常发——
+    /// Ack 语义是「服务端已接管」，不是「人人已收到」）；
+    /// `false` = 不是群，回落单聊投递 [`Sessions::deliver`]。
+    fn route(&self, to: u64, msg: &Msg) -> RouteFuture<'_>;
+}
+
+/// [`GroupRouter::route`] 的返回形态：装箱 future 让 trait 可作 `dyn` 对象
+/// （与 [`SendFuture`] 同一手法——`async fn` 直写 trait 不支持 `dyn`）。
+pub type RouteFuture<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 
 // ────────────────────────────────────────────────────────────────
 // 配置与会话中心
@@ -163,6 +195,14 @@ struct Inner {
     router: Router<SessionHandle>,
     snowflake: Mutex<Snowflake<SystemClock>>,
     offline: Mutex<HashMap<u64, VecDeque<Msg>>>,
+    /// 群路由策略（阶段 7 可选注入）：`None` = 所有消息走单聊投递。
+    ///
+    /// 为什么是 `RwLock<Option<..>>` 而不是构造参数：hub 需要
+    /// `Sessions` 才能投递，`Sessions` 需要 hub 才能分流——
+    /// 循环依赖在 setter 上闭合（[`Sessions::set_group_router`]），
+    /// 比在构造参数里互相纠缠便宜得多。读多写零（启动时设一次），
+    /// `std::sync::RwLock` 足够（微秒级临界区，不跨 `await`）。
+    group_router: RwLock<Option<Arc<dyn GroupRouter>>>,
     /// 连接 ID 分配器（雪花之外的轻量序号：重启清零也无妨，
     /// 它只在一轮服务进程内做身份区分）。
     conn_seq: AtomicU64,
@@ -183,6 +223,7 @@ impl Sessions {
                 router: Router::new(shard_count),
                 snowflake: Mutex::new(snowflake),
                 offline: Mutex::new(HashMap::new()),
+                group_router: RwLock::new(None),
                 conn_seq: AtomicU64::new(0),
                 config,
             }),
@@ -312,15 +353,79 @@ impl Sessions {
         session.sink.send_text(envelope).await.is_ok()
     }
 
+    /// 注入群路由策略（阶段 7）：web 装配层构建好 `GroupHub` 后回调挂接。
+    ///
+    /// # Panics
+    ///
+    /// 群路由锁中毒时 panic（锁中毒属实现 bug，应立即暴露）。
+    pub fn set_group_router(&self, router: Arc<dyn GroupRouter>) {
+        *self.inner.group_router.write().expect("群路由锁中毒") = Some(router);
+    }
+
+    /// 当前注入的群路由（`None` = 未注入，所有消息走单聊投递）。
+    ///
+    /// # Panics
+    ///
+    /// 群路由锁中毒时 panic（锁中毒属实现 bug，应立即暴露）。
+    #[must_use]
+    pub fn group_router(&self) -> Option<Arc<dyn GroupRouter>> {
+        self.inner.group_router.read().expect("群路由锁中毒").clone()
+    }
+
     /// 离线入队：超出上限丢最老的（`VecDeque` 头部 O(1)）。
     fn store_offline(&self, msg: Msg) {
+        self.store_offline_keyed(msg.to, msg);
+    }
+
+    /// 按指定键入队：键 = 接收者，与载荷 `to` 分离。
+    ///
+    /// 单聊路径两者天然相等（[`Sessions::store_offline`]）；群扇出的
+    /// 离线降级专用本入口——群消息的 `to` 是群 ID（接收端靠它认会话，
+    /// **不能改写**），但离线队列必须按接收者 keyed（`sync_since`
+    /// 按接收者拉取）。键与载荷分离是这个语义差的唯一无损解。
+    fn store_offline_keyed(&self, key: u64, msg: Msg) {
         let max = self.inner.config.max_offline_per_user;
         let mut offline = self.inner.offline.lock().expect("离线表锁中毒");
-        let queue = offline.entry(msg.to).or_default();
+        let queue = offline.entry(key).or_default();
         if queue.len() >= max {
             queue.pop_front();
         }
         queue.push_back(msg);
+    }
+
+    /// 群扇出的单接收者投递（阶段 7）：**同步快路径**，无一处 `await`。
+    ///
+    /// 与 [`Sessions::deliver`] 的语义差异（三条，全部服务于「2 万人扇出」）：
+    ///
+    /// - **非阻塞**：`try_send` 满即跳过（[`FanoutOutcome::Skipped`]）。
+    ///   一个慢消费者若能挂起扇出 actor，其余全部成员都会被拖慢
+    ///   （队头阻塞）——隔离的代价是本轮该成员丢失消息（群消息
+    ///   尚无持久化，后续阶段补同步游标），`skipped` 计数如实暴露
+    ///   这个取舍；
+    /// - **离线键 ≠ 载荷 to**：群消息的 `to` 是群 ID（接收端靠它认会话），
+    ///   但离线队列必须按接收者 keyed——入队键与载荷分离
+    ///   （[`Sessions::store_offline_keyed`]）；
+    /// - **同步**：路由点查、序号分配、帧编码、`try_send`、离线入队全是
+    ///   微秒级纯内存操作——扇出 actor 一口气循环 2 万人不释放执行权
+    ///   （顺带保证群内投递顺序：成员看到的序 = actor 处理序）。
+    ///
+    /// 连接将死（`Closed`）时与单聊 [`Sessions::deliver`] 同语义：
+    /// 降级离线——「消息不丢」优先于「状态新鲜」。
+    ///
+    /// 返回投递结果（`web::fanout::GroupHub` 据此累计三路计数，
+    /// 压测与诊断都用它做口径）。
+    pub fn fanout_one(&self, recipient: u64, msg: &Msg) -> FanoutOutcome {
+        if let Some(session) = self.inner.router.get(recipient) {
+            // 无锁分配下行序号（与 deliver 同源：多群并发扇出不冲突）
+            let seq = session.send_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            match session.sink.try_send(msg.encode_frame(seq, 0)) {
+                Ok(()) => return FanoutOutcome::Delivered,
+                Err(TrySendError::Full) => return FanoutOutcome::Skipped, // 隔离：跳过慢消费者
+                Err(TrySendError::Closed) => {} // 连接将死 → 降级离线（与 deliver 同语义）
+            }
+        }
+        self.store_offline_keyed(recipient, msg.clone());
+        FanoutOutcome::Offline
     }
 
     /// 拉取并移除 `user_id` 的离线消息中 `msg_id > since` 的前 `batch` 条。
@@ -351,6 +456,18 @@ impl Sessions {
         }
         out
     }
+}
+
+/// 群扇出单接收者的投递结果（诊断与压测的计数口径）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FanoutOutcome {
+    /// 在线且非阻塞入队成功。
+    Delivered,
+    /// 慢消费者（出站通道满）：已跳过——隔离取舍，见
+    /// [`Sessions::fanout_one`]。
+    Skipped,
+    /// 接收者不在线（或连接将死）：已降级离线队列。
+    Offline,
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -571,7 +688,18 @@ async fn handle_msg(
         client_msg_id: upstream.client_msg_id,
         content: upstream.content,
     };
-    sessions.deliver(&outgoing).await;
+
+    // 群分流（阶段 7）：注入的 GroupRouter 判定 `to` 是否群——
+    // 是群则扇出路径接管（返回 true）；未注入（纯 TCP 测试形态）
+    // 或不是群则回落单聊投递。会话核心因此不感知群域：
+    // 「谁是群」的真相在 DB，抽象成一个可注入的判定。
+    let handled = match sessions.group_router() {
+        Some(router) => router.route(outgoing.to, &outgoing).await,
+        None => false,
+    };
+    if !handled {
+        sessions.deliver(&outgoing).await;
+    }
 
     // 消息级确认：`msg_id` 供排序/同步游标，`client_msg_id` 供发送方
     // 核销重发表（重发会换新 `msg_id`，只有客户端键跨重发稳定）
@@ -779,6 +907,118 @@ mod tests {
                 "不应有任何回帧"
             );
         }
+    }
+
+    /// 支持非阻塞投递的测试 sink（扇出路径的完整形状：
+    /// `send` + `try_send` 双通道，直接映射 mpsc 的两种入队）。
+    #[derive(Debug)]
+    struct FanoutSink(mpsc::Sender<Frame>);
+
+    impl crate::sink::FrameSink for FanoutSink {
+        fn send(&self, frame: Frame) -> crate::sink::SendFuture<'_> {
+            Box::pin(async move { self.0.send(frame).await.map_err(|_| TransportError::Closed) })
+        }
+
+        fn try_send(&self, frame: Frame) -> Result<(), crate::sink::TrySendError> {
+            self.0.try_send(frame).map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => crate::sink::TrySendError::Full,
+                mpsc::error::TrySendError::Closed(_) => crate::sink::TrySendError::Closed,
+            })
+        }
+    }
+
+    /// 群扇出单接收者投递的三态：在线送达 / 慢消费者跳过 / 离线降级——
+    /// 且离线键 = 接收者、载荷 `to` = 群 ID 保持不变（两个语义都要验）。
+    #[tokio::test]
+    async fn fanout_one_covers_deliver_skip_offline() {
+        let sessions = Sessions::new(test_config());
+        let group_msg = Msg {
+            from: 1,
+            to: 999, // 群 ID
+            msg_id: 7,
+            client_msg_id: 1,
+            content: Bytes::from_static(b"to-group"),
+        };
+
+        // 在线 + 通道空闲：Delivered，下行序号从 1 开始
+        let (tx, mut rx) = mpsc::channel(4);
+        sessions.register(10, 1, Arc::new(FanoutSink(tx))).expect("首个注册不应冲突");
+        assert_eq!(sessions.fanout_one(10, &group_msg), FanoutOutcome::Delivered);
+        let frame = timeout(WAIT, rx.recv()).await.expect("应收到帧").expect("sink 存活");
+        assert_eq!(frame.seq, 1, "下行序号从 1 开始");
+        let decoded = Msg::decode_frame(&frame).expect("载荷应与命令字匹配");
+        assert_eq!(decoded.to, 999, "下行载荷的 to 保持群 ID");
+
+        // 慢消费者（容量 1，塞满后不排空）：Skipped——不挂起、不降级
+        let (full_tx, _full_rx) = mpsc::channel(1);
+        full_tx
+            .try_send(Frame::new(im_protocol::Cmd::Msg, 1, 0, Bytes::new()))
+            .expect("占位帧应能塞满容量 1 的通道");
+        sessions.register(11, 2, Arc::new(FanoutSink(full_tx))).expect("首个注册不应冲突");
+        assert_eq!(sessions.fanout_one(11, &group_msg), FanoutOutcome::Skipped);
+        assert_eq!(sessions.offline_count(11), 0, "慢消费者跳过 ≠ 离线降级");
+
+        // 连接将死（接收端全掉）：Closed → 降级离线（与单聊 deliver 同语义）
+        let (dead_tx, dead_rx) = mpsc::channel(1);
+        sessions.register(12, 3, Arc::new(FanoutSink(dead_tx))).expect("首个注册不应冲突");
+        drop(dead_rx);
+        assert_eq!(sessions.fanout_one(12, &group_msg), FanoutOutcome::Offline);
+        assert_eq!(sessions.offline_count(12), 1);
+
+        // 离线成员：离线键 = 接收者，载荷 to = 群（同步拉回时能认会话）
+        assert_eq!(sessions.fanout_one(13, &group_msg), FanoutOutcome::Offline);
+        assert_eq!(sessions.offline_count(13), 1);
+        assert_eq!(sessions.offline_count(999), 0, "队列不能 keyed 在群 ID 上");
+        let synced = sessions.sync_since(13, 0, 10);
+        assert_eq!(synced.len(), 1);
+        assert_eq!(synced[0].to, 999, "离线载荷的 to 保持群 ID");
+        assert_eq!(synced[0].msg_id, 7, "msg_id 不变（同步游标口径统一）");
+    }
+
+    /// 群分流注入：`set_group_router` 后发往「群」的消息被路由器接管
+    /// （不落单聊离线队列），发往普通用户的消息照常单聊投递。
+    #[tokio::test]
+    async fn injected_group_router_intercepts_group_msgs() {
+        /// 记数路由器：命中指定群 ID 时接管并计数（hub 的最小同构体）。
+        #[derive(Debug)]
+        struct CountingRouter {
+            group: u64,
+            routed: Arc<AtomicU64>,
+        }
+
+        impl GroupRouter for CountingRouter {
+            fn route(&self, to: u64, _msg: &Msg) -> RouteFuture<'_> {
+                let hit = to == self.group;
+                let routed = Arc::clone(&self.routed);
+                Box::pin(async move {
+                    if hit {
+                        routed.fetch_add(1, Ordering::Relaxed);
+                    }
+                    hit
+                })
+            }
+        }
+
+        let (addr, sessions, _shutdown) = server().await;
+        let routed = Arc::new(AtomicU64::new(0));
+        sessions
+            .set_group_router(Arc::new(CountingRouter { group: 999, routed: Arc::clone(&routed) }));
+
+        let mut alice = TestClient::connect(addr).await;
+        assert!(alice.handshake(1, "t").await.is_accepted());
+
+        // 群消息：被路由器接管——不落单聊投递（to=999 无离线队列）
+        alice.send_msg(999, b"to group").await;
+        let ack: MsgAck = alice.recv().await; // Ack 照常（「服务端已接管」）
+        assert_ne!(ack.msg_id, 0);
+        assert_eq!(routed.load(Ordering::Relaxed), 1, "群消息应被路由器接管");
+        assert_eq!(sessions.offline_count(999), 0, "群消息不应落单聊离线队列");
+
+        // 单聊消息：路由器返回 false，回落 deliver——离线 2 有队列
+        alice.send_msg(2, b"to user").await;
+        let _: MsgAck = alice.recv().await;
+        assert_eq!(routed.load(Ordering::Relaxed), 1, "单聊不应被路由器接管");
+        assert_eq!(sessions.offline_count(2), 1, "单聊照常单聊投递");
     }
 
     /// 传输解耦回归：注册一个非 TCP 的自定义 sink，`deliver` 照常送达——

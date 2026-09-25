@@ -120,6 +120,20 @@ impl ConnectionHandle {
     pub async fn send(&self, frame: Frame) -> Result<(), TransportError> {
         self.tx.send(frame).await.map_err(|_| TransportError::Closed)
     }
+
+    /// **非阻塞**发送一帧：通道满时立即失败，绝不挂起。
+    ///
+    /// 需求方是 im-server 的群扇出（阶段 7）：2 万接收者里混着慢消费者
+    /// 时，满则挂起的 `send` 会把一个人慢变成全群慢——扇出路径需要
+    /// “跳过慢的”的权限。
+    ///
+    /// # Errors
+    ///
+    /// 通道满返回 [`tokio::sync::mpsc::error::TrySendError::Full`]；
+    /// 写 actor 已退出（连接将死）返回 `Closed`。
+    pub fn try_send(&self, frame: Frame) -> Result<(), mpsc::error::TrySendError<Frame>> {
+        self.tx.try_send(frame)
+    }
 }
 
 /// 递交给业务层的入站事件：一帧 +「怎么回话」的句柄 + 对端地址。

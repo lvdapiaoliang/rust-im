@@ -26,6 +26,7 @@
 pub mod account;
 pub mod api;
 pub mod db;
+pub mod fanout;
 pub mod files;
 pub mod friends;
 pub mod groups;

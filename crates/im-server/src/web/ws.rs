@@ -45,7 +45,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::session::{SessionState, handle_frame, reply};
-use crate::sink::{FrameSink, SendFuture};
+use crate::sink::{FrameSink, SendFuture, TrySendError};
 
 use super::api::AppState;
 
@@ -262,6 +262,18 @@ impl FrameSink for WsSink {
             self.tx.send(Outbound::Text(text)).await.map_err(|_| TransportError::Closed)
         })
     }
+
+    fn try_send(&self, frame: Frame) -> Result<(), TrySendError> {
+        // 与 send 同一翻译（帧 → 信封文本 → 出站通道），只换入队方式：
+        // 满即 Full（慢消费者，扇出路径跳过）、关即 Closed（降级离线）
+        let Some(text) = frame_to_envelope(&frame) else {
+            return Ok(()); // 传输层帧按成功对待（与 send 同语义）
+        };
+        self.tx.try_send(Outbound::Text(text)).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(_) => TrySendError::Full,
+            mpsc::error::TrySendError::Closed(_) => TrySendError::Closed,
+        })
+    }
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -381,10 +393,12 @@ async fn handle_socket(state: AppState, user_id: u64, socket: WebSocket) {
 
 /// 入站信封分发：解析 →（ping 就地回 / 业务帧翻译 → 权限校验 → 去重 → 会话核心）。
 ///
-/// 阶段 6 起单聊有**好友门槛**：`to` 不是群时，收发双方必须是好友
-/// （服务端校验，客户端伪造无效）。代价是每条消息两次主键点查
-/// （`is_group` / `is_friend`）——本地回环 PG 上是微秒级；阶段 7 群
-/// actor 与关系缓存上线后这条路径再优化。
+/// 发送门槛（阶段 6 单聊 / 阶段 7 群聊）：`to` 是群 → 发送者必须是群成员
+/// （`not_member`）；不是群 → 收发双方必须是好友（`not_friend`）。
+/// 服务端校验，客户端伪造无效。代价是每条消息两三次主键点查
+/// （`is_group` / `is_member` / `is_friend`）——扇出的成员表已进 actor
+/// 快照，但门槛要防「知道群 ID 就能发言」，不能用快照（见
+/// [`super::groups::GroupStore::is_member`]）。
 #[allow(clippy::too_many_arguments)]
 async fn dispatch_inbound(
     state: &AppState,
@@ -417,18 +431,29 @@ async fn dispatch_inbound(
         Ok(Some(frame)) => frame,
     };
 
-    // 好友门槛：单聊（to 不是群）要求收发双方已是好友
+    // 发送门槛：单聊要好友关系（阶段 6），群聊要成员身份（阶段 7）
     if frame.cmd == Cmd::Msg {
         if let Ok(msg) = Msg::decode_frame(&frame) {
             let is_group = state.groups.is_group(msg.to).await.unwrap_or(false);
-            let allowed =
-                is_group || state.friends.is_friend(user_id, msg.to).await.unwrap_or(false);
+            let (allowed, code, message) = if is_group {
+                (
+                    state.groups.is_member(msg.to, user_id).await.unwrap_or(false),
+                    "not_member",
+                    "只有群成员可以发送群消息",
+                )
+            } else {
+                (
+                    state.friends.is_friend(user_id, msg.to).await.unwrap_or(false),
+                    "not_friend",
+                    "仅好友之间可以发送消息",
+                )
+            };
             if !allowed {
                 // 错误载荷带 client_msg_id：前端能把失败精确落到那条乐观消息上
                 // （错误信封不 ack、不入离线——它只关乎这一条发送尝试）
                 let payload = json!({
-                    "code": "not_friend",
-                    "message": "仅好友之间可以发送消息",
+                    "code": code,
+                    "message": message,
                     "client_msg_id": msg.client_msg_id.to_string(),
                 });
                 let _ = tx.try_send(Outbound::Text(outbound_envelope(
@@ -562,6 +587,26 @@ mod tests {
         let env: Value = serde_json::from_str(&text).expect("应为合法 JSON");
         assert_eq!(env["type"], envelope_type::MSG_ACK);
         assert_eq!(env["payload"]["msg_id"], "7");
+    }
+
+    /// `WsSink::try_send` 三态：空闲 Ok / 占满 Full（慢消费者）/ 关闭 Closed
+    /// ——群扇出隔离在 WS 传输侧的两个失败源都在这里。
+    #[tokio::test]
+    async fn ws_sink_try_send_full_and_closed() {
+        let (tx, rx) = mpsc::channel(1);
+        let sink = WsSink { tx };
+
+        let ack = MsgAck { msg_id: 1, client_msg_id: 1 };
+        sink.try_send(ack.encode_frame(1, 0)).expect("空闲通道应成功");
+        assert!(
+            matches!(sink.try_send(ack.encode_frame(2, 0)), Err(TrySendError::Full)),
+            "占满后应报 Full 而非挂起"
+        );
+        drop(rx);
+        assert!(
+            matches!(sink.try_send(ack.encode_frame(3, 0)), Err(TrySendError::Closed)),
+            "接收端全掉后应报 Closed"
+        );
     }
 
     // ── 集成测试（真 HTTP + 真 WS + 真 PG；PG 不可达则跳过）──
@@ -875,7 +920,7 @@ mod tests {
         let _ = bob.recv().await; // 消化 welcome
 
         // 群内单条消息的扇出是阶段 7 的工作——这里验证的是「门槛不拦群消息」：
-        // 消息进入会话核心（有 ack）而非被 not_friend 拒绝
+        // 消息进入会话核心（有 ack）而非被 not_member 拒绝
         alice
             .send(
                 envelope_type::MSG,
@@ -884,6 +929,100 @@ mod tests {
             .await;
         let ack = alice.recv().await;
         assert_eq!(ack["type"], envelope_type::MSG_ACK, "群消息不应被好友门槛拒绝");
+    }
+
+    /// 群扇出主线（阶段 7）：成员发群消息 → 在线成员实时收到
+    /// （载荷 `to` = 群 ID，前端靠它认会话），发送者本人只有 ack。
+    #[tokio::test]
+    async fn group_msg_fans_out_to_online_members() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (id_a, token_a) =
+            user_with_token(&state, &format!("ws_fo_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_b, token_b) =
+            user_with_token(&state, &format!("ws_fo_b_{}", uuid::Uuid::new_v4().simple())).await;
+
+        let group = state
+            .groups
+            .create_group(&state.sessions, "ws-fanout", id_a)
+            .await
+            .expect("建群应成功");
+        state.groups.add_member(group.id, id_a, id_b).await.expect("拉人应成功");
+
+        let mut alice = WsClient::connect(&format!("{url}?token={token_a}")).await;
+        let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
+        let _ = alice.recv().await; // 消化 welcome
+        let _ = bob.recv().await; // 消化 welcome
+
+        alice
+            .send(
+                envelope_type::MSG,
+                json!({ "to": group.id.to_string(), "client_msg_id": 1, "content": "hi group" }),
+            )
+            .await;
+        let ack = alice.recv().await;
+        assert_eq!(ack["type"], envelope_type::MSG_ACK, "发送者应先拿到接管 ack");
+
+        // Bob 视角：实时收到，to = 群 ID（会话识别的依据）
+        let got = bob.recv().await;
+        assert_eq!(got["type"], envelope_type::MSG);
+        assert_eq!(got["payload"]["to"], group.id.to_string());
+        assert_eq!(got["payload"]["from"], id_a.to_string());
+        assert_eq!(got["payload"]["content"], "hi group");
+
+        // 发送者无回显：若扇出错发了副本，它会排在任何后续信封之前——
+        // 用 ping/pong 探测（pong 先到 = 通道里没有残留回显）
+        alice.send(envelope_type::PING, json!({})).await;
+        let pong = alice.recv().await;
+        assert_eq!(pong["type"], envelope_type::PONG, "发送者不应收到自己的群消息回显");
+    }
+
+    /// 非成员发群消息（阶段 7 门槛）：`not_member` 错误信封带
+    /// `client_msg_id`，连接不断；群内其他成员零动静。
+    #[tokio::test]
+    async fn non_member_group_msg_is_rejected() {
+        let Some((url, state)) = ws_server_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let (id_a, _token_a) =
+            user_with_token(&state, &format!("ws_nm_a_{}", uuid::Uuid::new_v4().simple())).await;
+        let (id_b, token_b) =
+            user_with_token(&state, &format!("ws_nm_b_{}", uuid::Uuid::new_v4().simple())).await;
+        let (_id_c, token_c) =
+            user_with_token(&state, &format!("ws_nm_c_{}", uuid::Uuid::new_v4().simple())).await;
+
+        // A 建群拉 B；C 刻意不入群（非成员是被测前提）
+        let group = state
+            .groups
+            .create_group(&state.sessions, "ws-not-member", id_a)
+            .await
+            .expect("建群应成功");
+        state.groups.add_member(group.id, id_a, id_b).await.expect("拉人应成功");
+
+        let mut bob = WsClient::connect(&format!("{url}?token={token_b}")).await;
+        let mut intruder = WsClient::connect(&format!("{url}?token={token_c}")).await;
+        let _ = bob.recv().await; // 消化 welcome
+        let _ = intruder.recv().await; // 消化 welcome
+
+        intruder
+            .send(
+                envelope_type::MSG,
+                json!({ "to": group.id.to_string(), "client_msg_id": 9, "content": "intrude" }),
+            )
+            .await;
+        let err = intruder.recv().await;
+        assert_eq!(err["type"], envelope_type::ERROR);
+        assert_eq!(err["payload"]["code"], "not_member");
+        assert_eq!(err["payload"]["client_msg_id"], "9", "失败要能落到具体乐观消息");
+
+        // 成员侧零动静 + 闯入者连接仍活
+        assert_eq!(state.sessions.offline_count(id_b), 0);
+        intruder.send(envelope_type::PING, json!({})).await;
+        let pong = intruder.recv().await;
+        assert_eq!(pong["type"], envelope_type::PONG);
     }
 
     /// 事件推送（阶段 6）：REST 发起好友请求，在线的接收方 WS 实时收到

@@ -27,6 +27,7 @@ use sqlx::PgPool;
 use crate::session::Sessions;
 
 use super::account::{AccountError, AccountStore, User};
+use super::fanout::GroupHub;
 use super::files::{FileError, FileMeta, FileStore, MAX_FILE_SIZE};
 use super::friends::{FriendError, FriendStore};
 use super::groups::{GroupError, GroupStore};
@@ -45,12 +46,19 @@ pub struct AppState {
     pub friends: FriendStore,
     /// 群组域仓储。
     pub groups: GroupStore,
+    /// 群扇出中枢（阶段 7）：REST 加人后 `invalidate` 快照；
+    /// 以 `GroupRouter` 身份注入进 `sessions`（见 [`AppState::new`]）。
+    pub hub: GroupHub,
     /// 文件域仓储。
     pub files: FileStore,
 }
 
 impl AppState {
     /// 组装应用状态（`files_root` 不存在会自动创建）。
+    ///
+    /// 群分流在此挂接：hub 投递需要 `Sessions`、`Sessions` 分流需要
+    /// hub——循环依赖在 setter 上闭合（见 [`Sessions::set_group_router`]），
+    /// 装配层是唯一知道两边的地方。
     ///
     /// # Errors
     ///
@@ -60,11 +68,15 @@ impl AppState {
         sessions: Sessions,
         files_root: impl Into<PathBuf>,
     ) -> Result<Self, FileError> {
+        let groups = GroupStore::new(pool.clone());
+        let hub = GroupHub::new(groups.clone(), sessions.clone());
+        sessions.set_group_router(std::sync::Arc::new(hub.clone()));
         Ok(Self {
             sessions,
             accounts: AccountStore::new(pool.clone()),
             friends: FriendStore::new(pool.clone()),
-            groups: GroupStore::new(pool.clone()),
+            groups,
+            hub,
             files: FileStore::new(pool, files_root).await?,
         })
     }
@@ -266,7 +278,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/friends/{user_id}", delete(delete_friend))
         .route("/api/users", get(find_user))
         .route("/api/groups", post(create_group).get(my_groups))
-        .route("/api/groups/{id}/members", post(add_group_member))
+        .route("/api/groups/{id}/members", post(add_group_member).get(list_group_members))
         .route("/api/files", post(upload_file))
         .route("/api/files/{id}", get(download_file))
         .route("/ws", get(super::ws::ws_handler))
@@ -485,7 +497,23 @@ async fn add_group_member(
     Json(req): Json<AddMemberReq>,
 ) -> Result<StatusCode, ApiError> {
     state.groups.add_member(group_id, auth.user.id, req.user_id).await?;
+    // 写路径的责任：改库后打脏扇出快照（invalidate-on-write，
+    // 见 web::fanout 模块文档）——新成员下一条群消息就能收到
+    state.hub.invalidate(group_id);
     Ok(StatusCode::OK)
+}
+
+/// GET /api/groups/{id}/members：成员视图列表（限群成员访问）。
+async fn list_group_members(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(group_id): Path<u64>,
+) -> Result<Json<Vec<super::groups::GroupMember>>, ApiError> {
+    if !state.groups.is_member(group_id, auth.user.id).await? {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "只有群成员可以查看成员列表"));
+    }
+    let members = state.groups.list_member_users(group_id).await?;
+    Ok(Json(members))
 }
 
 // ────────────────────────────────────────────────────────────────
