@@ -279,18 +279,22 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        // 服务端：TLS accept → 网关（服务端心跳策略：自动回 Pong）
+        // 服务端：TLS accept → 网关（服务端心跳策略：自动回 Pong）。
+        // 服务端业务层只需**持有并排空**入站通道——服务端模式下 Ping
+        // 被网关就地应答，业务层本来也看不到什么，但 Receiver 决不能
+        // 立刻 drop（通道关闭会把网关误杀）。
         let server = tokio::spawn(async move {
             let (tcp, _) = listener.accept().await.unwrap();
             let tls = acceptor.accept_stream(tcp).await.unwrap();
-            run_gateway_connection(
+            let (server_tx, mut server_rx) = tokio::sync::mpsc::channel(16);
+            let gateway = tokio::spawn(run_gateway_connection(
                 tls,
                 crate::gateway::GatewayConfig::default(),
-                tokio::sync::mpsc::channel(16).0,
+                server_tx,
                 shutdown_channel().1,
-            )
-            .await
-            .unwrap();
+            ));
+            while server_rx.recv().await.is_some() {} // 排空入站（否则反压会阻塞读循环）
+            gateway.await.unwrap().unwrap();
         });
 
         // 客户端：TLS connect → 网关（客户端策略：50ms 心跳发 Ping）
