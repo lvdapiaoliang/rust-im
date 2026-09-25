@@ -64,7 +64,10 @@ impl LatencyHist {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            counts: vec![0; (MAX_BUCKET + 1) * usize::try_from(SLOTS).expect("槽数装得下 usize")],
+            counts: vec![
+                0;
+                (MAX_BUCKET + 1) * usize::try_from(SLOTS).expect("槽数装得下 usize")
+            ],
             total: 0,
             min: u64::MAX,
             max: 0,
@@ -102,7 +105,9 @@ impl LatencyHist {
         let n = u128::from(self.total);
         let rank = (n * u128::from(pct)).div_ceil(100).min(n);
         let mut seen: u128 = 0;
-        for (bucket, chunk) in self.counts.chunks(usize::try_from(SLOTS).expect("槽数装得下 usize")).enumerate() {
+        for (bucket, chunk) in
+            self.counts.chunks(usize::try_from(SLOTS).expect("槽数装得下 usize")).enumerate()
+        {
             for (slot, &count) in chunk.iter().enumerate() {
                 seen += u128::from(count);
                 if seen >= rank {
@@ -198,10 +203,8 @@ impl TestRng {
 
     /// 下一个 64 位值（Numerical Recipes LCG + 高位异或混合）。
     pub(crate) fn next_u64(&mut self) -> u64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 =
+            self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         self.0 ^ (self.0 >> 33)
     }
 }
@@ -228,7 +231,9 @@ mod tests {
     /// 定位与取值互为逆映射：`locate` 后 `bucket_value` 满足"槽下界 ≤ 原值 < 槽上界"。
     #[test]
     fn locate_and_value_roundtrip() {
-        for v in [256u64, 257, 300, 511, 512, 513, 1023, 1024, 1 << 20, 1 << 40, u64::MAX / 2, u64::MAX] {
+        for v in
+            [256u64, 257, 300, 511, 512, 513, 1023, 1024, 1 << 20, 1 << 40, u64::MAX / 2, u64::MAX]
+        {
             let (b, s) = locate(v);
             let lb = bucket_value(b, s);
             assert!(lb <= v, "槽下界 {lb} 应 ≤ 值 {v}");
@@ -245,10 +250,7 @@ mod tests {
         for v in [256u64, 1_000, 100_000, 10_000_000, 1_000_000_000, 1 << 40] {
             let (b, s) = locate(v);
             let lb = bucket_value(b, s);
-            assert!(
-                v - lb <= v / SLOTS + 1,
-                "槽 {b}/{s} 对 {v} 的精度超标（下界 {lb}）"
-            );
+            assert!(v - lb <= v / SLOTS + 1, "槽 {b}/{s} 对 {v} 的精度超标（下界 {lb}）");
         }
     }
 

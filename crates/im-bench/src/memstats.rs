@@ -128,8 +128,8 @@ mod windows {
 
     /// 当前进程工作集字节数。
     pub fn working_set() -> Option<u64> {
-        let cb = u32::try_from(size_of::<PROCESS_MEMORY_COUNTERS>())
-            .expect("结构体大小远小于 u32 上限"); // cast 纪律：try_from 收口
+        let cb =
+            u32::try_from(size_of::<PROCESS_MEMORY_COUNTERS>()).expect("结构体大小远小于 u32 上限"); // cast 纪律：try_from 收口
         let mut counters = PROCESS_MEMORY_COUNTERS {
             cb,
             PageFaultCount: 0,

@@ -32,8 +32,8 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -211,7 +211,9 @@ async fn pump_in(
                 if frame.cmd == Cmd::Msg {
                     stats.msg_seen.fetch_add(1, Ordering::Relaxed);
                 }
-                if u64::from(cfg.loss_permille) > 0 && rng.below(1000) < u64::from(cfg.loss_permille) {
+                if u64::from(cfg.loss_permille) > 0
+                    && rng.below(1000) < u64::from(cfg.loss_permille)
+                {
                     stats.dropped.fetch_add(1, Ordering::Relaxed);
                     continue; // 整帧丢弃：流上不留任何痕迹（帧级注入的本质）
                 }
@@ -220,7 +222,8 @@ async fn pump_in(
                     Duration::ZERO
                 } else {
                     // as_millis 是 u128：毫秒级抖动上限对 u64 毫无截断风险，try_from 收口
-                    let jitter_ms = u64::try_from(cfg.jitter.as_millis()).expect("抖动毫秒数装得下 u64");
+                    let jitter_ms =
+                        u64::try_from(cfg.jitter.as_millis()).expect("抖动毫秒数装得下 u64");
                     Duration::from_millis(rng.below(jitter_ms))
                 };
                 let ready = tokio::time::Instant::now() + cfg.delay + extra;
@@ -390,8 +393,7 @@ async fn run_reliability(cfg: ReliabilityCfg) -> Result<ReliabilityOutcome> {
     };
     let (server_addr, _sessions, server_shutdown) =
         im_server::spawn_server(server_cfg).await.context("启动被测服务端")?;
-    let proxy =
-        spawn_proxy(server_addr, cfg.up, cfg.down).await.context("架设弱网代理")?;
+    let proxy = spawn_proxy(server_addr, cfg.up, cfg.down).await.context("架设弱网代理")?;
 
     // ── 双客户端：真实 run_client（重传/去重/落盘全套）穿过代理 ──
     // data_dir 纪律（docs/20 §4.1）：同一用户全程一个目录——去重键的
@@ -450,7 +452,7 @@ async fn run_reliability(cfg: ReliabilityCfg) -> Result<ReliabilityOutcome> {
                     record_receive(&t0, &mut received, &mut latency, msg.client_msg_id);
                 }
             }
-            Some(_) => {} // Connected/Disconnected(Bob)/SyncBatch 等：不参与对账
+            Some(_) => {}  // Connected/Disconnected(Bob)/SyncBatch 等：不参与对账
             None => break, // 客户端事件流关闭：停止等待
         }
     }
@@ -597,7 +599,12 @@ pub async fn weak_link(args: &WeakLinkArgs) -> Result<()> {
     let cfg = ReliabilityCfg {
         messages: args.messages,
         up: LinkCfg { delay: one_way, jitter, loss_permille: args.loss_permille, seed: args.seed },
-        down: LinkCfg { delay: one_way, jitter, loss_permille: args.loss_permille, seed: args.seed ^ 0x5DEE_CE66 },
+        down: LinkCfg {
+            delay: one_way,
+            jitter,
+            loss_permille: args.loss_permille,
+            seed: args.seed ^ 0x5DEE_CE66,
+        },
         retry_timeout: Duration::from_millis(args.retry_timeout_ms),
         retry_max_attempts: args.retry_max_attempts,
         deadline: Duration::from_secs(args.deadline_secs),
@@ -632,7 +639,8 @@ fn report(args: &WeakLinkArgs, o: &ReliabilityOutcome) {
         "服务端确认      : {} 条   放弃(重传耗尽): {} 条   发送端断线重连: {} 次",
         o.acked, o.failed, o.reconnects
     );
-    let arrival_permille = u128::from(o.received as u64) * 1000 / u128::try_from(o.sent).unwrap_or(1);
+    let arrival_permille =
+        u128::from(o.received as u64) * 1000 / u128::try_from(o.sent).unwrap_or(1);
     println!(
         "接收端实收      : {} 条（去重后口径）→ 到达率 {}‰（{}.{}%）",
         o.received,
@@ -728,10 +736,12 @@ mod tests {
         })
         .await
         .expect("服务应能启动");
-        let clean = LinkCfg { delay: Duration::ZERO, jitter: Duration::ZERO, loss_permille: 0, seed: 1 };
+        let clean =
+            LinkCfg { delay: Duration::ZERO, jitter: Duration::ZERO, loss_permille: 0, seed: 1 };
         let proxy = spawn_proxy(addr, clean, clean).await.expect("代理应能监听");
 
-        let mut conn = Connection::connect(&proxy.addr.to_string()).await.expect("穿过代理应能连上");
+        let mut conn =
+            Connection::connect(&proxy.addr.to_string()).await.expect("穿过代理应能连上");
         let hs = Handshake { user_id: 1, token: "any".into() };
         conn.write_frame(&hs.encode_frame(1, 0)).await.expect("握手帧应能写出");
         let frame = tokio::time::timeout(Duration::from_secs(2), conn.read_frame())
@@ -742,7 +752,13 @@ mod tests {
         let ack = HandshakeAck::decode_frame(&frame).expect("应答应是 HandshakeAck");
         assert!(ack.session_id > 0, "全放行服务端应接受");
 
-        let msg = Msg { from: 0, to: 2, msg_id: 0, client_msg_id: 1, content: bytes::Bytes::from_static(b"p") };
+        let msg = Msg {
+            from: 0,
+            to: 2,
+            msg_id: 0,
+            client_msg_id: 1,
+            content: bytes::Bytes::from_static(b"p"),
+        };
         conn.write_frame(&msg.encode_frame(2, 0)).await.expect("消息应能写出");
         let frame = tokio::time::timeout(Duration::from_secs(2), conn.read_frame())
             .await

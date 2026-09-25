@@ -180,7 +180,11 @@ fn thousands(n: u128) -> String {
 
 /// 命令行入口（clap derive：子命令留给后续场景扩展）。
 #[derive(Parser)]
-#[command(name = "im-bench", about = "rust-im 压测工具（阶段 7 群扇出 / 阶段 10 三级里程碑）", version)]
+#[command(
+    name = "im-bench",
+    about = "rust-im 压测工具（阶段 7 群扇出 / 阶段 10 三级里程碑）",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

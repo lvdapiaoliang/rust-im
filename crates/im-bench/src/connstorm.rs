@@ -80,7 +80,12 @@ fn connect_bound(local: IpAddr, server: SocketAddr) -> io::Result<TcpStream> {
 ///
 /// 写失败、超时、连接关闭或服务端拒绝（`session_id` == 0）都报错，
 /// 错误串进入失败分类统计。
-async fn handshake(conn: &mut Connection, user_id: u64, token: &str, wait: Duration) -> Result<(), String> {
+async fn handshake(
+    conn: &mut Connection,
+    user_id: u64,
+    token: &str,
+    wait: Duration,
+) -> Result<(), String> {
     let hs = Handshake { user_id, token: token.to_string() };
     conn.write_frame(&hs.encode_frame(1, 0)).await.map_err(|e| format!("写握手帧: {e}"))?;
     let frame = tokio::time::timeout(wait, conn.read_frame())
@@ -181,11 +186,7 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
 
     // ── 守恒校验：在线数必须等于保活袋大小 ──
     let online = sessions.online_count();
-    anyhow::ensure!(
-        online == held.len(),
-        "计数对不上：路由表 {online} vs 保活连接 {}",
-        held.len()
-    );
+    anyhow::ensure!(online == held.len(), "计数对不上：路由表 {online} vs 保活连接 {}", held.len());
 
     // ── 稳态：hold 秒内每秒采样内存与在线数 ──
     let mut hold_samples = Vec::new();
@@ -212,7 +213,18 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
         tokio::task::yield_now().await;
     };
 
-    report(args, total_before, connect_ns, handshake_ns, &failures, baseline, &hold_samples, t_storm.elapsed(), teardown, cleared)?;
+    report(
+        args,
+        total_before,
+        connect_ns,
+        handshake_ns,
+        &failures,
+        baseline,
+        &hold_samples,
+        t_storm.elapsed(),
+        teardown,
+        cleared,
+    )?;
     shutdown_tx.trigger();
     Ok(())
 }
@@ -243,8 +255,10 @@ fn report(
     );
     println!("建立            : {established} 连接，风暴墙钟 {}", fmt_secs(storm_wall));
     if established > 0 {
-        let cps = u128::try_from(established).expect("连接数装得下 u128") * 1_000_000_000 / connect_ns.max(1);
-        let hps = u128::try_from(established).expect("连接数装得下 u128") * 1_000_000_000 / handshake_ns.max(1);
+        let cps = u128::try_from(established).expect("连接数装得下 u128") * 1_000_000_000
+            / connect_ns.max(1);
+        let hps = u128::try_from(established).expect("连接数装得下 u128") * 1_000_000_000
+            / handshake_ns.max(1);
         println!("建连相          : {}（{} 连接/秒）", fmt_ns(connect_ns), thousands(cps));
         println!("握手相          : {}（{} 连接/秒）", fmt_ns(handshake_ns), thousands(hps));
     }
@@ -347,16 +361,21 @@ mod tests {
     /// （127.0.0.2 是回环——Windows/Linux 对 127/8 全段默认如此。）
     #[tokio::test]
     async fn bound_connect_handshakes_through_real_server() {
-        let (addr, _sessions, shutdown) =
-            im_server::spawn_server(SessionConfig { authenticator: Arc::new(AllowAll), ..SessionConfig::default() })
-                .await
-                .expect("服务应能启动");
+        let (addr, _sessions, shutdown) = im_server::spawn_server(SessionConfig {
+            authenticator: Arc::new(AllowAll),
+            ..SessionConfig::default()
+        })
+        .await
+        .expect("服务应能启动");
         let stream = connect_bound(IpAddr::V4(Ipv4Addr::LOCALHOST), addr).expect("绑定回环连接");
         let mut conn = Connection::new(stream);
-        handshake(&mut conn, 7, "any", Duration::from_secs(2)).await.expect("全放行服务端应接受握手");
+        handshake(&mut conn, 7, "any", Duration::from_secs(2))
+            .await
+            .expect("全放行服务端应接受握手");
 
         // 一条上行消息 → 服务端裁决并回执（完整会话路径的最小验证）
-        let msg = Msg { from: 0, to: 99, msg_id: 0, client_msg_id: 1, content: Bytes::from_static(b"x") };
+        let msg =
+            Msg { from: 0, to: 99, msg_id: 0, client_msg_id: 1, content: Bytes::from_static(b"x") };
         conn.write_frame(&msg.encode_frame(2, 0)).await.expect("消息应能写出");
         let frame = timeout(Duration::from_secs(2), conn.read_frame())
             .await
