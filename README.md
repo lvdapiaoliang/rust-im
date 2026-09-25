@@ -96,6 +96,7 @@ web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 ca
 - [13 - 群消息扇出与 2 万人在线](docs/13-group-fanout.md)（阶段 7）
 - [14 - WebRTC 音视频与远程桌面](docs/14-webrtc.md)（阶段 8）
 - [15 - 群会议与屏幕共享（LiveKit SFU）](docs/15-meeting.md)（阶段 9）
+- [20 - Rust 全栈踩坑与填坑实录（含业务开发常见错误）](docs/20-rust-pitfalls.md)（全程）
 - 16~19 随开发阶段逐步补充（压测 / FFI / E2EE / QUIC）
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。

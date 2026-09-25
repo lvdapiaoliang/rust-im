@@ -208,6 +208,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 17-ffi.md              （阶段 11）FFI SDK
 18-e2ee.md             （阶段 12）端到端加密与桌面端
 19-quic-fuse.md        （阶段 13）QUIC 与挂载盘
+20-rust-pitfalls.md    全程：踩坑与填坑实录（真实事件 + Rust 业务常见错误速查）
 ```
 
 > 文档编号即写作顺序：08~11 因阶段重排让位给 Web 系列（12~15），
