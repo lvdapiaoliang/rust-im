@@ -36,6 +36,8 @@ extern "C" {
 #define IM_SDK_ERR_TIMEOUT        3  /* 等待事件超时（正常轮询路径之一） */
 #define IM_SDK_ERR_POLL_WITH_CB   4  /* 回调模式下调用 poll */
 #define IM_SDK_ERR_INTERNAL       5  /* 内部故障（兜底） */
+#define IM_SDK_ERR_REJECTED        6  /* 握手被服务端拒绝（不再重连；阶段 12 新增，
+                                         类型状态 API 的终局错误码） */
 
 /* ── 事件类型码（数值稳定）── */
 

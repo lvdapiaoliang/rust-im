@@ -14,6 +14,10 @@
 //!   │ ffi.rs：C ABI（唯一的 unsafe 集中区）           │
 //!   │   指针判空 / UTF-8 校验 / 内存契约履行点         │
 //!   ├──────────────────────────────────────────────┤
+//!   │ native.rs：Rust 原生面（阶段 12）               │
+//!   │   TypedSdkClient<Connected> 类型状态 API        │
+//!   │   （Tauri 等 rlib 宿主直接依赖；编译期状态门禁） │
+//!   ├──────────────────────────────────────────────┤
 //!   │ core.rs：同步外观 SdkClient（全安全代码）        │
 //!   │   专属 Runtime / 事件泵线程 / SyncBatch 展开     │
 //!   ├──────────────────────────────────────────────┤
@@ -23,6 +27,13 @@
 //!   │ im-client：异步内核（本 crate 不改一行）         │
 //!   └──────────────────────────────────────────────┘
 //! ```
+//!
+//! # 同一实现、两种消费面
+//!
+//! C ABI 面（`ffi.rs`）把状态门禁降级为运行时检查（`void*` 到不了 C 的
+//! 类型系统，docs/17 §七的诚实边界）；Rust 原生面（`native.rs`）用类型
+//! 状态把「未连接不能发消息」升回编译期保证。两层共享同一个
+//! [`SdkClient`]——**模式是否适用由消费方的类型系统决定**。
 //!
 //! # 三条契约（跨语言 SDK 的命根，docs/17 全文展开）
 //!
@@ -43,17 +54,23 @@
 pub mod core;
 pub mod error;
 mod ffi;
+pub mod native;
 
 #[cfg(feature = "jni")]
 mod jni;
+
+#[cfg(test)]
+mod testutil;
 
 pub use core::{
     EVENT_ACK, EVENT_CONNECTED, EVENT_DISCONNECTED, EVENT_MESSAGE, EVENT_MESSAGE_QUEUED,
     EVENT_REJECTED, EVENT_SEND_FAILED, ImSdkEvent, SdkClient,
 };
 pub use error::{
-    ERR_INTERNAL, ERR_INVALID_ARG, ERR_POLL_WITH_CALLBACK, ERR_STOPPED, ERR_TIMEOUT, OK,
+    ERR_HANDSHAKE_REJECTED, ERR_INTERNAL, ERR_INVALID_ARG, ERR_POLL_WITH_CALLBACK, ERR_STOPPED,
+    ERR_TIMEOUT, OK,
 };
+pub use native::{Connected, Disconnected, TypedSdkClient};
 
 /// SDK 版本号：跨语言调用方用于运行时兼容性检查
 /// （C 侧同名函数 `im_sdk_version`；JNI 侧 `Sdk.version()`——三处同源于此）。
