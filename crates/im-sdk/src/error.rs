@@ -46,14 +46,17 @@ pub const fn error_string(code: i32) -> &'static str {
     ];
     if code >= 0 {
         // 先 unsigned_abs 剥负号（u32）再扩展 usize——两步各自零损耗；
-        // 直接 `i32 as usize` 是先截断后扩展，负数会回绕成巨大下标
-        // （外层守卫虽能兑住，但两步拆开让「负数不可能进来」不靠心算）
+        // 直接 `i32 as usize` 是先截断后扩展，负数会回绕成巨大下标。
+        // 负数守卫不可省：-3 的 abs 是 3，会假性地命中合法下标！
         let idx = code.unsigned_abs() as usize;
         if idx < STRINGS.len() {
-            return STRINGS[idx];
+            STRINGS[idx]
+        } else {
+            "unknown error code"
         }
+    } else {
+        "unknown error code"
     }
-    return "unknown error code";
 }
 
 #[cfg(test)]
