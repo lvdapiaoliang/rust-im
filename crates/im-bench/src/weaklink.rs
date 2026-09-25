@@ -825,4 +825,36 @@ mod tests {
         );
         assert!(outcome.latency.count() > 0, "有实收就有延迟样本");
     }
+
+    /// 大突发 + 双向丢包（消息数 > 接收窗 64）：这正是压测抓出
+    /// 接收窗楔死缺陷的场景——帧级丢失在窗口前方留下永不回填的洞
+    /// （应用层重发用新 seq），修复前洞后第 64 帧起被服务端永久
+    /// 静默丢弃，实收率卡在 ~29%；修复（TooFar 重同步）后上行由
+    /// 重传闭环、下行单次投递的残余丢失如实暴露（设计边界）。
+    /// 固定种子 → 确定性实验（同种子同一结果，可精确重放）。
+    #[tokio::test]
+    async fn large_burst_survives_bidirectional_loss() {
+        let one_way = Duration::from_millis(10);
+        let cfg = ReliabilityCfg {
+            messages: 80, // 刻意大于窗口容量 64
+            up: LinkCfg { delay: one_way, jitter: Duration::ZERO, loss_permille: 100, seed: 31 },
+            down: LinkCfg { delay: one_way, jitter: Duration::ZERO, loss_permille: 100, seed: 33 },
+            retry_timeout: Duration::from_millis(60),
+            retry_max_attempts: 8,
+            deadline: Duration::from_secs(30),
+            payload_bytes: 32,
+            data_base: std::env::temp_dir().join("im-bench-weaklink-burst"),
+        };
+        let outcome = run_reliability(cfg).await.expect("场景应能完成");
+        assert_eq!(outcome.sent, 80);
+        assert_eq!(outcome.failed, 0, "8 次尝试应吃净上行丢包，实际放弃 {}", outcome.failed);
+        // 下行投递是单次机会（服务端不重传投递帧）：10% 丢失如实留在
+        // 到达率里——应用层 Ack 只闭环上行，这是 docs/16 记录的边界。
+        assert!(
+            outcome.received >= 68,
+            "重同步后大突发不应楔死：实收 {} / 80",
+            outcome.received
+        );
+        assert!(outcome.upstream_attempts > 80, "双向丢包下上行必有重传");
+    }
 }
