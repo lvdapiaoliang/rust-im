@@ -6,11 +6,11 @@
 //! # 为什么手写 FFI 而不是引三方库
 //!
 //! - `sysinfo`/`windows` crate 都能做，但为了两个数（工作集/提交内存）
-//! 拖进几 MB 依赖不值得；
+//!   拖进几 MB 依赖不值得；
 //! - 这里只调一个函数：`GetProcessMemoryInfo`（kernel32，PSAPI 自 Win7
-//! 起转发进 kernel32）——正好作为**阶段 11 FFI 的前置小菜**：
-//! extern 声明、`#[repr(C)]` 布局、`HANDLE` 的不可拷贝语义，
-//! 都在 30 行内演练一遍（完整版见 `im-sdk` 与 docs/17）。
+//!   起转发进 kernel32）——正好作为**阶段 11 FFI 的前置小菜**：
+//!   extern 声明、`#[repr(C)]` 布局、`HANDLE` 的不可拷贝语义，
+//!   都在 30 行内演练一遍（完整版见 `im-sdk` 与 docs/17）。
 //!
 //! # 平台矩阵
 //!
@@ -37,7 +37,7 @@ fn boot() -> std::time::Instant {
     *BOOT.get_or_init(std::time::Instant::now)
 }
 
-/// 采一次当前进程工作集（Windows: WorkingSetSize；Linux: VmRSS）。
+/// 采一次当前进程工作集（Windows: `WorkingSetSize`；Linux: `VmRSS`）。
 ///
 /// 返回 `None` = 本平台未实现（报告侧如实标注，不伪造数字——
 /// docs/20 §6.4 的诚实账单纪律）。
@@ -86,13 +86,13 @@ mod windows {
     //!   缓冲布局与 `#[repr(C)]` 结构一一对应（字段顺序/宽度来自
     //!   Win32 SDK 头文件），`cb` 字段就是 `size_of` 防线；
     //! - 调用线程无重入、无并发危害：函数是纯查询。
-    #![allow(unsafe_code, non_camel_case_types, non_snake_case)] // FFI 命名随 Win32 SDK
+    #![allow(unsafe_code, non_camel_case_types, non_snake_case, clippy::upper_case_acronyms)] // FFI 命名随 Win32 SDK（BOOL/HANDLE 是官方拼写）
 
     use std::mem::size_of;
 
     /// Win32 `PROCESS_MEMORY_COUNTERS`（PSAPI.h）的布局镜像。
     ///
-    /// 字段全部由 FFI 写入（rustc 看不到"读"，dead_code 会误报）；
+    /// 字段全部由 FFI 写入（rustc 看不到"读"，`dead_code` 会误报）；
     /// 一个字段都不允许删——布局错位就是内存破坏。
     #[repr(C)]
     #[allow(dead_code)]
@@ -147,7 +147,7 @@ mod windows {
             // GetCurrentProcess 返回伪句柄恒有效（见模块 SAFETY 论证）
             GetProcessMemoryInfo(GetCurrentProcess(), &raw mut counters, counters.cb)
         };
-        (ok != 0).then(|| counters.WorkingSetSize as u64) // usize→u64：同宽无损
+        (ok != 0).then_some(counters.WorkingSetSize as u64) // usize→u64：同宽无损
     }
 }
 

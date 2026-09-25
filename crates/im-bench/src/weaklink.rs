@@ -17,7 +17,7 @@
 //!
 //! 字节级丢包会把流内字节撕开一个洞，后续所有帧都会校验失败——
 //! 那测的是"协议如何死于字节损坏"，不是"应用如何在帧丢失下自愈"。
-//! IM 的可靠性语义（seq 去重、client_msg_id 核销、指数退避重传）
+//! IM 的可靠性语义（seq 去重、`client_msg_id` 核销、指数退避重传）
 //! 全部以帧为单位，所以注入也以帧为单位。
 //!
 //! # 被测路径是真实的
@@ -113,12 +113,6 @@ struct LinkStats {
     msg_seen: AtomicU64,
 }
 
-impl LinkStats {
-    fn bump(&self, counter: &AtomicU64) {
-        counter.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
 /// 双向统计的持有者（代理返回给场景读数；每方向是独立 `Arc`——
 /// 泵 task 的生命周期与代理同长，场景随时读另一半）。
 #[derive(Debug, Default)]
@@ -202,7 +196,7 @@ fn spawn_pump(reader: ReadHalf, writer: WriteHalf, cfg: LinkCfg, stats: Arc<Link
 ///
 /// **取消安全说明**：本 task 从不被取消（它拥有整条方向的输入半部），
 /// `read_frame` 的内部缓冲不必考虑半读状态——这是把"读"与"调度"
-/// 拆成两个 task 的原因（select 循环里直接 read_frame 会踩取消安全的坑，
+/// 拆成两个 task 的原因（select 循环里直接 `read_frame` 会踩取消安全的坑，
 /// docs/20 §3.3）。
 async fn pump_in(
     mut reader: ReadHalf,
@@ -215,10 +209,10 @@ async fn pump_in(
         match reader.read_frame().await {
             Ok(Some(frame)) => {
                 if frame.cmd == Cmd::Msg {
-                    stats.bump(&stats.msg_seen);
+                    stats.msg_seen.fetch_add(1, Ordering::Relaxed);
                 }
                 if u64::from(cfg.loss_permille) > 0 && rng.below(1000) < u64::from(cfg.loss_permille) {
-                    stats.bump(&stats.dropped);
+                    stats.dropped.fetch_add(1, Ordering::Relaxed);
                     continue; // 整帧丢弃：流上不留任何痕迹（帧级注入的本质）
                 }
                 // 到达时刻 = 现在 + 基础延迟 + [0, jitter) 抖动（抖动才产生乱序）
@@ -288,12 +282,12 @@ async fn pump_out(
                     }
                     None => rx_open = false,
                 },
-                _ = tokio::time::sleep_until(due) => {
+                () = tokio::time::sleep_until(due) => {
                     let Reverse(HeapItem(_, _, frame)) = heap.pop().expect("非空堆必能弹出");
                     if writer.write_frame(&frame).await.is_err() {
                         return; // 写半部死亡：丢弃余下帧，方向收工
                     }
-                    stats.bump(&stats.forwarded);
+                    stats.forwarded.fetch_add(1, Ordering::Relaxed);
                 }
             }
         } else if rx_open {
@@ -406,7 +400,7 @@ async fn run_reliability(cfg: ReliabilityCfg) -> Result<ReliabilityOutcome> {
     for user in ["alice", "bob"] {
         let dir = cfg.data_base.join(user);
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).with_context(|| format!("建本地库目录 {dir:?}"))?;
+        std::fs::create_dir_all(&dir).with_context(|| format!("建本地库目录 {}", dir.display()))?;
     }
 
     let (alice, mut alice_events) =
@@ -520,6 +514,41 @@ async fn run_reliability(cfg: ReliabilityCfg) -> Result<ReliabilityOutcome> {
     })
 }
 
+/// 等两端握手就位（握手帧本身要过弱网——丢包时靠客户端重连重试）。
+///
+/// # Errors
+///
+/// 20s 内未双端就位，或任一客户端事件流关闭（意外退出）时报错。
+async fn wait_both_ready(
+    alice: &mut mpsc::Receiver<ClientEvent>,
+    bob: &mut mpsc::Receiver<ClientEvent>,
+    permille: u32,
+) -> Result<()> {
+    let mut alice_ready = false;
+    let mut bob_ready = false;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !(alice_ready && bob_ready) {
+        if Instant::now() > deadline {
+            anyhow::bail!("20s 内未完成双端握手（丢包 {permille}‰ 下重连应能成功）");
+        }
+        tokio::select! {
+            ev = alice.recv() => match ev {
+                Some(ClientEvent::Connected { .. }) => alice_ready = true,
+                // 其余一切事件（含 Disconnected——重连中）：继续等
+                Some(_) => {}
+                None => anyhow::bail!("alice 客户端意外退出"),
+            },
+            ev = bob.recv() => match ev {
+                Some(ClientEvent::Connected { .. }) => bob_ready = true,
+                // 其余一切事件（含 Disconnected——重连中）：继续等
+                Some(_) => {}
+                None => anyhow::bail!("bob 客户端意外退出"),
+            },
+        }
+    }
+    Ok(())
+}
+
 /// 事件来源标记（对账时区分 alice 侧与 bob 侧）。
 enum Side {
     Alice,
@@ -536,7 +565,7 @@ async fn next_event(
     tokio::select! {
         ev = alice.recv() => ev.map(|e| (Side::Alice, e)),
         ev = bob.recv() => ev.map(|e| (Side::Bob, e)),
-        _ = tokio::time::sleep(wait) => None,
+        () = tokio::time::sleep(wait) => None,
     }
 }
 
@@ -554,7 +583,7 @@ fn record_receive(
     }
 }
 
-/// 起一个真实客户端（run_client：完整状态机 + 重发表 + 本地库）。
+/// 起一个真实客户端（`run_client`：完整状态机 + 重发表 + 本地库）。
 async fn spawn_client(
     proxy_addr: SocketAddr,
     user_id: u64,

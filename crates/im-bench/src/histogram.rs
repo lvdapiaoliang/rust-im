@@ -35,14 +35,14 @@
 
 use std::time::Duration;
 
-/// 每桶槽数 = 2^SIGNIFICANT_BITS：决定相对精度（1/256 ≈ 0.39%）。
+/// 每桶槽数 = 2^`SIGNIFICANT_BITS`：决定相对精度（1/256 ≈ 0.39%）。
 const SIGNIFICANT_BITS: u32 = 8;
 /// 每桶槽数。
 const SLOTS: u64 = 1 << SIGNIFICANT_BITS; // 256
-/// 最大桶号：u64 顶端位段（floor(log2(u64::MAX)) - 8 + 1 = 56）。
+/// 最大桶号：u64 顶端位段（`floor(log2(u64::MAX))` - 8 + 1 = 56）。
 const MAX_BUCKET: usize = 64 - SIGNIFICANT_BITS as usize; // 56
 
-/// 延迟直方图：固定 (MAX_BUCKET+1)×256 个计数槽，无堆增长、无再分配。
+/// 延迟直方图：固定 (`MAX_BUCKET`+1)×256 个计数槽，无堆增长、无再分配。
 ///
 /// 记录口径：纳秒整数（u64 足装 ~584 年；测量代码不掺浮点）。
 #[derive(Debug)]
@@ -64,7 +64,7 @@ impl LatencyHist {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            counts: vec![0; (MAX_BUCKET + 1) * SLOTS as usize],
+            counts: vec![0; (MAX_BUCKET + 1) * usize::try_from(SLOTS).expect("槽数装得下 usize")],
             total: 0,
             min: u64::MAX,
             max: 0,
@@ -75,7 +75,7 @@ impl LatencyHist {
     /// 记录一个样本（纳秒）。
     pub fn record_ns(&mut self, ns: u64) {
         let (bucket, slot) = locate(ns);
-        self.counts[bucket * SLOTS as usize + slot] += 1;
+        self.counts[bucket * usize::try_from(SLOTS).expect("槽数装得下 usize") + slot] += 1;
         self.total += 1;
         self.min = self.min.min(ns);
         self.max = self.max.max(ns);
@@ -102,7 +102,7 @@ impl LatencyHist {
         let n = u128::from(self.total);
         let rank = (n * u128::from(pct)).div_ceil(100).min(n);
         let mut seen: u128 = 0;
-        for (bucket, chunk) in self.counts.chunks(SLOTS as usize).enumerate() {
+        for (bucket, chunk) in self.counts.chunks(usize::try_from(SLOTS).expect("槽数装得下 usize")).enumerate() {
             for (slot, &count) in chunk.iter().enumerate() {
                 seen += u128::from(count);
                 if seen >= rank {
@@ -166,7 +166,7 @@ fn locate(v: u64) -> (usize, usize) {
         let slot = usize::try_from(v).expect("v < 256，usize 必装得下");
         return (0, slot);
     }
-    let mag = 63 - v.leading_zeros(); // floor(log2 v)；v ≥ 256 ⇒ mag ≥ 8
+    let mag = v.ilog2(); // floor(log2 v)；v ≥ 256 ⇒ mag ≥ 8
     let bucket = usize::try_from(mag - SIGNIFICANT_BITS + 1).expect("桶号装得下 usize");
     let shifted = v >> (bucket - 1);
     let slot = usize::try_from(shifted - SLOTS).expect("同桶内偏移 < 256，usize 必装得下");
@@ -200,8 +200,8 @@ impl TestRng {
     pub(crate) fn next_u64(&mut self) -> u64 {
         self.0 = self
             .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         self.0 ^ (self.0 >> 33)
     }
 }
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(h.max().expect("有样本").as_nanos(), 255);
     }
 
-    /// 定位与取值互为逆映射：locate 后 bucket_value 满足"槽下界 ≤ 原值 < 槽上界"。
+    /// 定位与取值互为逆映射：`locate` 后 `bucket_value` 满足"槽下界 ≤ 原值 < 槽上界"。
     #[test]
     fn locate_and_value_roundtrip() {
         for v in [256u64, 257, 300, 511, 512, 513, 1023, 1024, 1 << 20, 1 << 40, u64::MAX / 2, u64::MAX] {

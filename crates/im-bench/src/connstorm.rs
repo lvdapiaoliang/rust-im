@@ -71,14 +71,14 @@ fn connect_bound(local: IpAddr, server: SocketAddr) -> io::Result<TcpStream> {
     sock.bind(&SockAddr::from(SocketAddr::new(local, 0)))?;
     sock.connect(&SockAddr::from(server))?;
     sock.set_nonblocking(true)?;
-    Ok(TcpStream::from_std(sock.into())?)
+    TcpStream::from_std(sock.into())
 }
 
 /// 在一条连接上完成协议握手：发 `Handshake`，等 `HandshakeAck`。
 ///
 /// # Errors
 ///
-/// 写失败、超时、连接关闭或服务端拒绝（session_id == 0）都报错，
+/// 写失败、超时、连接关闭或服务端拒绝（`session_id` == 0）都报错，
 /// 错误串进入失败分类统计。
 async fn handshake(conn: &mut Connection, user_id: u64, token: &str, wait: Duration) -> Result<(), String> {
     let hs = Handshake { user_id, token: token.to_string() };
@@ -105,6 +105,7 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
     anyhow::ensure!(args.connections >= 1, "--connections 至少为 1");
     anyhow::ensure!(args.wave >= 1, "--wave 至少为 1");
     anyhow::ensure!(args.source_ips >= 1, "--source-ips 至少为 1");
+    anyhow::ensure!(args.source_ips <= 254, "--source-ips 最多 254（127.0.0.x 的 x 段上限）");
     let hold_secs = args.hold_secs.min(45); // 服务端 60s 读空闲纪律
     let need_ips = u32::try_from(args.connections / 16_000 + 1).expect("连接数装得下 u32");
     if args.source_ips < need_ips {
@@ -211,7 +212,7 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
         tokio::task::yield_now().await;
     };
 
-    report(args, total_before, connect_ns, handshake_ns, failures, baseline, &hold_samples, t_storm.elapsed(), teardown, cleared)?;
+    report(args, total_before, connect_ns, handshake_ns, &failures, baseline, &hold_samples, t_storm.elapsed(), teardown, cleared)?;
     shutdown_tx.trigger();
     Ok(())
 }
@@ -227,7 +228,7 @@ fn report(
     established: usize,
     connect_ns: u128,
     handshake_ns: u128,
-    failures: HashMap<String, usize>,
+    failures: &HashMap<String, usize>,
     baseline: Option<memstats::MemSnapshot>,
     hold_samples: &[(u64, u64)],
     storm_wall: Duration,
@@ -277,9 +278,11 @@ fn report(
 }
 
 /// 第 `idx` 条连接的源 IP：127.0.0.(1 + idx 轮换)。
+///
+/// 入参 `ips` 已在场景入口校验 ≤ 254——末段必然装得下 u8。
 fn source_ip(idx: usize, ips: u32) -> IpAddr {
     let last = 1 + (u32::try_from(idx).expect("连接数装得下 u32") % ips);
-    IpAddr::V4(Ipv4Addr::new(127, 0, 0, last as u8))
+    IpAddr::V4(Ipv4Addr::new(127, 0, 0, u8::try_from(last).expect("末段 ≤ 254（入口已校验）")))
 }
 
 /// 纳秒 → 人读时长（µs/ms/s 三段）。
@@ -333,11 +336,11 @@ mod tests {
     /// 源 IP 轮换：idx 均匀散布在 127.0.0.1..=127.0.0.N。
     #[test]
     fn source_ip_round_robin() {
-        assert_eq!(source_ip(0, 1), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(source_ip(0, 3), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(source_ip(0, 1), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(source_ip(0, 3), IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(source_ip(4, 3), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)));
         assert_eq!(source_ip(5, 3), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3)));
-        assert_eq!(source_ip(6, 3), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(source_ip(6, 3), IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     /// 绑定源 IP 的连接：走完整服务端握手 + 一条消息往返。
