@@ -267,7 +267,7 @@ unsafe fn free_event_boxed(event: *mut ImSdkEvent) {
 ///
 /// # Safety
 /// `ptr` 须为 null 或指向 NUL 结尾的有效内存。
-unsafe fn str_from_c(ptr: *const c_char) -> Option<String> {
+pub(crate) unsafe fn str_from_c(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
