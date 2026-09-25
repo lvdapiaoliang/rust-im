@@ -267,22 +267,22 @@ impl RatchetState {
 
         // 2. 新的远端公钥 = 对端推进了 DH 棘轮：排空旧链 + 推进自己的
         if Some(msg.header.dh) != self.dh_remote {
-            if self.dh_remote.is_some() {
+            if let (Some(old_remote), Some(old_chain)) = (self.dh_remote, self.chain_recv) {
                 // 对端换了密钥对——先把它**上一条链**（PN 长度）的跳过密钥补齐，
-                // 防止旧链的迟到消息永远解不开。
-                // 旧链先**拷出**再调 `&mut self` 的方法：[u8;32] 是 Copy，
-                // 借用冲突用值拷贝消解（32 字节的拷贝在这里不值一提）
-                let old_remote = self.dh_remote.expect("上面刚检查过 Some");
-                let old_chain = self.chain_recv.expect("有旧远端公钥则有旧接收链");
-                self.skip_to(old_remote, &old_chain, msg.header.prev_chain_len)?;
+                // 防止旧链的迟到消息永远解不开。没有旧接收链（如发起方
+                // 首次收到回信）就没旧链可排，直接进棘轮。
+                // 返回值丢弃：旧链补齐后即被新链替换，推进结果无人消费
+                let _ = self.skip_to(old_remote, old_chain, msg.header.prev_chain_len)?;
             }
             self.dh_ratchet_recv_side(&msg.header.dh);
         }
 
-        // 3. 当前链上仍需跳到 header.n：把跳过序号的 MK 缓存好
+        // 3. 当前链上仍需跳到 header.n：把跳过序号的 MK 缓存好，
+        //    **拿回推进后的链**再派生本条消息的密钥（乱序到达时链已
+        //    向前走了 N 步，用旧位置的 CK 派生必然对不上）
         let remote = self.dh_remote.expect("DH 棘轮推进后必有远端公钥");
         let chain = self.chain_recv.expect("DH 棘轮推进后必有接收链");
-        self.skip_to(remote, &chain, msg.header.n)?;
+        let chain = self.skip_to(remote, chain, msg.header.n)?;
         // 推进接收链指针：拿走第 n 个 MK，CKr 前进
         let mk = kdf_ck_mk(&chain);
         self.chain_recv = Some(kdf_ck_next(&chain));
@@ -338,7 +338,12 @@ impl RatchetState {
         self.n_send = 0;
     }
 
-    /// 从当前接收链序号跳到 `until`：跳过序号的 MK 全部缓存。
+    /// 从当前接收链序号跳到 `until`：跳过序号的 MK 全部缓存，
+    /// **返回推进到 `until` 位置的链密钥**（调用方拿它派生本条消息的
+    /// MK——乱序时链已走了 N 步，不能再用入口位置的 CK）。
+    ///
+    /// 链密钥按值传入：[u8;32] 是 Copy，避开 `&self.chain_recv` 与
+    /// `&mut self.skipped` 的借用冲突（32 字节的拷贝在这里不值一提）。
     ///
     /// # Errors
     ///
@@ -346,9 +351,9 @@ impl RatchetState {
     fn skip_to(
         &mut self,
         remote: PublicKey,
-        chain: &[u8; KEY_LEN],
+        chain: [u8; KEY_LEN],
         until: u32,
-    ) -> Result<(), CryptoError> {
+    ) -> Result<[u8; KEY_LEN], CryptoError> {
         let from = self.n_recv;
         if until < from {
             return Err(CryptoError::Ratchet(format!(
@@ -362,7 +367,7 @@ impl RatchetState {
                 MAX_SKIP
             )));
         }
-        let mut ck = *chain;
+        let mut ck = chain;
         let remote_bytes = *remote.as_bytes();
         for n in from..until {
             let mk = kdf_ck_mk(&ck);
@@ -370,7 +375,7 @@ impl RatchetState {
             ck = kdf_ck_next(&ck);
         }
         self.n_recv = until;
-        Ok(())
+        Ok(ck)
     }
 }
 
