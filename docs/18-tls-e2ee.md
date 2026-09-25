@@ -369,13 +369,20 @@ async fn send_message(state: State<AppState>, to: u64, content: String) -> Resul
 - **`skip_to` 状态归属**：按值收链返回新链——多拷一次 32 字节，
   换「状态归属无歧义」，值。
 
-## 九、下一步（阶段 13 预告）
+## 九、下一步（阶段 13 预告，已兑现）
 
 传输层拼图的最后一块：QUIC（quinn）——TLS 1.3 内建、0-RTT、多路
 复用、连接迁移，以及挂载盘设计（IM 协议与 QUIC stream 的映射）。
 阶段 12 的 `GatewayStream` 已经把网关对流类型的依赖抽干净，QUIC
 流实现同一个 trait 就能进网关——泛型化在这先付了一笔，后面连着
 收利息。docs/19 立此为证。
+
+**阶段 13 已兑现（见 docs/19）**：多路复用与网关零改动收利息如期
+兑付（`QuicStream` 实现 `GatewayStream`，测试钉死无队头阻塞）；
+两处如实对账：0-RTT 与连接迁移的 API 未暴露（quinn 能力面有，
+本模块未开，docs/19 §六记录）；挂载盘交付的是语义层（im-mount：
+IM 数据 → FS 视图映射），预告里「IM 协议与 QUIC stream 的映射」
+的措辞以实际交付口径为准。
 
 ## 十、面试题与标准回答
 

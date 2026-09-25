@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-**阶段 0~12 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
+**阶段 0~13 已完成**：二进制协议、传输层（心跳/优雅关闭）、会话层（认证/路由/离线补投）、
 客户端消息级重传 + 自研本地库（LSM 思想）+ ratatui TUI，全链路 e2e 含崩溃重传场景；
 Web 接入与持久化（FrameSink 传输解耦、PostgreSQL + sqlx、axum REST、WS 网关
 JSON 信封协议、Vue 3 前端骨架），TCP/TUI 与 Web 双接入并存；好友系统全流程
@@ -27,7 +27,12 @@ GatewayStream 依赖倒置，自签 CA 材料层与装配层分离；Signal 双�
 学习实现：X3DH 异步密钥协商 + 消息级/轮级双棘轮 + 乱序容忍跳过缓存，
 性质测试替代官方测试向量；`im-sdk::native` 类型状态 Rust 原生 API
 （TypedSdkClient<Connected>——未连接的形态上 send 方法不存在，
-compile_fail doctest 锁死承诺），Tauri 壳走诚实边界，见 docs/18）。
+compile_fail doctest 锁死承诺），Tauri 壳走诚实边界，见 docs/18）；
+QUIC 传输与挂载盘语义层（quinn 多路复用：QuicStream 适配器实现 GatewayStream——
+阶段 12 泛型化的利息零改动兑现，两条会话流共用一条连接、无队头阻塞有测试钉死；
+im-mount：手写 LRU（slab 下标版，零 unsafe）+ 内存 FS 语义层（FUSE 回调对齐 +
+POSIX errno 分类）+ 目录缓存「先改数据再失效」纪律 + IM → FS 视图映射（只读投影），
+WinFsp 驱动接线为本机环境诚实边界，见 docs/19）。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
@@ -44,7 +49,7 @@ compile_fail doctest 锁死承诺），Tauri 壳走诚实边界，见 docs/18）
 | 10 | 压测与三级性能里程碑（M1 达成 99,969 连接；修复接收窗楔死缺陷） | ✅ |
 | 11 | FFI SDK（C ABI 动态库 / JNI） | ✅ |
 | 12 | TLS（rustls）+ E2EE（Signal 双棘轮）+ 类型状态原生 API | ✅ |
-| 13 | QUIC + 挂载盘（FUSE / WinFsp） | ⬜ |
+| 13 | QUIC（quinn 多路复用）+ 挂载盘语义层（im-mount，WinFsp 接线为诚实边界） | ✅ |
 | 14 | 开源工程化（CI 矩阵 / 文档站） | ⬜ |
 
 > 阶段重排说明：阶段 5~9 新增 Web 接入与社交功能，原压测/FFI/桌面+E2EE/QUIC/
@@ -66,6 +71,8 @@ cargo run -p im-bench --release -- conn-storm --connections 100000 --source-ips 
 cargo run -p im-bench --release -- weak-link        # 弱网可靠性（10% 丢包 + 100ms RTT）
 cargo xtask sdk               # 打包 FFI SDK 到 dist/sdk/（头文件 + JNI 源 + 动态库）
 cargo run -p im-server --example tls_demo   # TLS 全链路演示（自签证书 + 加密流跑帧协议）
+cargo run -p im-server --example quic_demo  # QUIC 演示（两条会话流共用一条连接，多路复用）
+cargo test -p im-mount                      # 挂载盘语义层（手写 LRU + 内存 FS + 目录缓存）
 
 # Web 前端（另一个终端，Node 18+）
 cd web
@@ -93,6 +100,7 @@ crates/
 ├── im-client/     客户端：消息重传/本地库/ratatui TUI → 桌面端
 ├── im-sdk/        FFI SDK：C ABI 动态库（.so/.dll/.dylib）+ JNI 绑定 + 类型状态原生 API
 ├── im-bench/      压测：连接风暴、吞吐基准、弱网模拟
+├── im-mount/      挂载盘语义层：手写 LRU、内存 FS、目录缓存、IM 视图映射（纯 std，零内部依赖）
 └── xtask/         构建任务：交叉编译、SDK 打包
 
 web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 cargo 成员）
@@ -116,8 +124,8 @@ web/               Web 前端：Vue 3 + TypeScript + Pinia（npm 项目，非 ca
 - [16 - 性能压测与三级里程碑](docs/16-perf.md)（阶段 10）
 - [17 - FFI SDK：C ABI / JNI / 内存契约](docs/17-ffi.md)（阶段 11）
 - [18 - TLS 与 E2EE：rustls 传输加密 + Signal 双棘轮 + 类型状态原生 API](docs/18-tls-e2ee.md)（阶段 12）
+- [19 - QUIC 与挂载盘：多路复用传输 + IM 数据的文件系统视图](docs/19-quic-fuse.md)（阶段 13）
 - [20 - Rust 全栈踩坑与填坑实录（含业务开发常见错误）](docs/20-rust-pitfalls.md)（全程）
-- 19 随开发阶段逐步补充（QUIC 与挂载盘）
 
 每份文档结构：本章目标 → 概念讲解（Java 对照）→ 项目真实代码走读 → 动手练习 → 面试题与标准回答。
 
