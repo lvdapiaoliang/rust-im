@@ -593,7 +593,7 @@ pub async fn serve_connection(
             // 重同步以到达帧为新基准；被跳过区间的重复投递由业务层
             // 按 `client_msg_id` 去重兜底——与「至少一次」语义兼容。
             Verdict::TooFar { .. } => state.resync(event.frame.seq),
-            Verdict::InOrder | Verdict::OutOfOrder => {}             // 上递
+            Verdict::InOrder | Verdict::OutOfOrder => {} // 上递
         }
         handle_frame(sessions, &mut state, conn_id, &event.frame, &sink).await;
     }
@@ -999,7 +999,9 @@ mod tests {
     /// 修复前洞后第 64 帧起被永久静默丢弃——心跳照常、上行业务全死。
     #[tokio::test]
     async fn too_far_resyncs_instead_of_wedging() {
-        let (addr, _sessions, shutdown) = server().await;
+        // _shutdown 保活（不 drop）："sender 全掉 = 视为关停"的语义下，
+        // 让服务端活到测试结束（下划线只压未用警告，不改变持有语义）
+        let (addr, _sessions, _shutdown) = server().await;
         let mut client = TestClient::connect(addr).await;
         assert!(client.handshake(1, "t").await.is_accepted());
 
