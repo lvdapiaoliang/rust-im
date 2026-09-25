@@ -30,8 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # 预编译二进制安装（比 cargo install 快几分钟，社区标准 action）
-      - uses: peaceiris/action-mdbook@v2
+      # 预编译二进制安装（比 cargo install 快几分钟，社区标准 action；
+      # 名字是 actions-mdbook 复数——写成 action-mdbook 会报 repository not found）
+      - uses: peaceiris/actions-mdbook@v2
         with:
           mdbook-version: "0.4.40"
       - run: mdbook build
