@@ -16,6 +16,10 @@ im-transport.workspace = true
 # 压测要驱动真实扇出引擎（GroupHub actor + Sessions::fanout_one），
 # 会话核心是必依赖——成员表来源用内存实现（MemberSource），不连库
 im-server.workspace = true
+# weak-link 场景驱动真实客户端（完整重传/去重/落盘状态机），不 mock
+im-client.workspace = true
+# conn-storm 的源 IP 轮换：std/tokio 都没有"先 bind 后 connect"
+socket2.workspace = true
 bytes.workspace = true
 tokio.workspace = true
 anyhow.workspace = true

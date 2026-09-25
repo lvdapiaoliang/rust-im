@@ -39,6 +39,14 @@ use im_server::{FrameSink, GroupRouter, SendFuture, SessionConfig, Sessions, Try
 use im_transport::TransportError;
 use tokio::sync::mpsc;
 
+mod connstorm;
+mod histogram;
+mod memstats;
+mod weaklink;
+
+use connstorm::ConnStormArgs;
+use weaklink::WeakLinkArgs;
+
 /// 压测群 ID：任意定值（避开成员 ID 段 `1..=members` 即可）。
 const GROUP_ID: u64 = 900_000_000_000;
 
@@ -172,17 +180,21 @@ fn thousands(n: u128) -> String {
 
 /// 命令行入口（clap derive：子命令留给后续场景扩展）。
 #[derive(Parser)]
-#[command(name = "im-bench", about = "rust-im 压测工具（阶段 7：群扇出热路径）", version)]
+#[command(name = "im-bench", about = "rust-im 压测工具（阶段 7 群扇出 / 阶段 10 三级里程碑）", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
 }
 
-/// 压测场景（阶段 7 仅有群扇出；阶段 8+ 按需追加子命令）。
+/// 压测场景。
 #[derive(Subcommand)]
 enum Command {
     /// 群扇出：真实扇出 actor + `try_send` 慢消费者隔离（无 `DB`/网络开销）
     GroupFanout(GroupFanoutArgs),
+    /// 连接风暴：真实 TCP 建连/握手速率 + 每连接内存账本（M1 里程碑）
+    ConnStorm(ConnStormArgs),
+    /// 弱网模拟：帧级丢包/延迟/乱序注入，真实客户端重传的到达率实测
+    WeakLink(WeakLinkArgs),
 }
 
 /// `group-fanout` 场景参数。
@@ -387,6 +399,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::GroupFanout(args) => group_fanout(&args).await,
+        Command::ConnStorm(args) => connstorm::conn_storm(&args).await,
+        Command::WeakLink(args) => weaklink::weak_link(&args).await,
     }
 }
 
