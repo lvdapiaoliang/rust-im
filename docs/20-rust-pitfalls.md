@@ -648,14 +648,21 @@ WebFetch Actions 页面才抓出来。
 
 **第三个缺陷**（改对 action 名后才暴露）：build 进到 `actions/configure-pages`
 报 `Get Pages site failed ... Not Found`——仓库的 GitHub Pages 还没开（Source
-未选 GitHub Actions）。这是写在注释里的「预置条件」，但人工没进 Settings
-做过——用 `configure-pages` 的 `enablement: true` 凭 `pages: write` 权限自动
-开启，免去人工。**这三个缺陷是递进的**：修好一个才能跑到下一个（容器
-报错遮住了一切→action 名错遮住了 build→build 过了才轮到 Pages 未开）。
+未选 GitHub Actions）。先试了 `configure-pages` 的 `enablement: true` 想凭
+`pages: write` 自动开启，实机又报 `Create Pages site failed: Resource not
+accessible by integration`——**首次创建 Pages 站点需 admin 权限，而
+GITHUB_TOKEN 最高只到 `pages: write`**，workflow 根本无法自建。这不是
+配置 bug，而是一条硬人工边界（同 §6.4 本机无 Docker）：**必须由仓库
+管理员手动进 Settings → Pages → Source 选 GitHub Actions 开一次**，开启后
+workflow 才能部署。已回退 enablement、将此前置如实写进 pages.yml 注释。
+**三个缺陷是递进的**：修好一个才能跑到下一个（容器报错遮住了一切→
+action 名错遮住了 build→build 过了才轮到 Pages 未开）；但前两个是
+我能改的配置 bug，第三个是只能人工做的仓库设置。
 
 三个 bug 归一条元教训：CI 配置的每个外部引用（runner 能力、action 名、
 image tag、Pages 开启状态）都属实机验证边界，push 后必须回看 Actions
-页面，别拿「本地全绿」当「线上能跑」。
+页面，别拿「本地全绿」当「线上能跑」；而其中有些（如首开 Pages）是
+人工管理员才能做的一次性设置，workflow 代不了劳——这种只能诚实记为待办。
 
 ---
 
