@@ -1,4 +1,4 @@
-//! 连接层：把裸 `TcpStream` 升级为「帧流」。
+//! 连接层：把字节流升级为「帧流」。
 //!
 //! [`Connection`] 只做一件事：让调用者用**帧**而不是字节思考。
 //!
@@ -11,20 +11,34 @@
 //! echo 循环搬运的是「字节切片」；这里交换的是「帧」——
 //! 阶段 1 的 `FrameDecoder` / `Frame::encode_into` 终于接上了真正的 TCP。
 //!
+//! # 装饰器模式：`TcpStream` → TLS 流 → 帧流（阶段 12）
+//!
+//! [`Connection`] 泛型于底层流 `S: AsyncRead + AsyncWrite`——同一个
+//! 帧协议层不加改动地叠在裸 TCP（`Connection<TcpStream>`）或 TLS 流
+//! （`Connection<tls::ServerTlsStream>`）上。这是 GoF 装饰器在 Rust 的
+//! 零成本形态：**组合 + 泛型约束**替代了面向对象的接口转发。类型默认
+//! 参数 `S = TcpStream` 让既有代码里的 `Connection` 名字与语义不变。
+//!
 //! # 半部拆分
 //!
 //! 读与写往往属于不同的 task（网关：读循环 + 写 actor，见 [`crate::gateway`]），
 //! [`Connection::into_split`] 按**所有权**把连接一分为二——
 //! 这是「split」模式在类型系统里的表达（更多背景见 `echo.rs` 顶部文档）。
+//!
+//! 半部实现随泛型化从 `TcpStream::into_split`（Owned 半部，TcpStream 专属）
+//! 改为 `tokio::io::split`（BiLock 半部，任何流通用）。取舍：BiLock 在
+//! **无争用**路径接近零成本（读写各归一个 task 的标准布局），争用时才
+//! 退化为锁；换来 TLS 流与未来 QUIC 流免改动的拆分能力。M1 压测基线
+//!（99,969 连接）建立在 Owned 半部上，未因换 BiLock 重测——数字口径
+//! 记于 docs/18 §七。
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 
 use bytes::BytesMut;
 use im_protocol::{DEFAULT_MAX_FRAME_LEN, Frame, FrameDecoder};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use crate::error::TransportError;
 
@@ -35,7 +49,7 @@ use crate::error::TransportError;
 /// 8 KB 足够单次系统调用搬完绝大多数 IM 帧。
 const READ_BUF_SIZE: usize = 8 * 1024;
 
-/// 一条 TCP 连接上的帧流。
+/// 一条字节流上的帧连接（默认 `TcpStream`；阶段 12 起也可叠 TLS 流）。
 ///
 /// 内部三件套：
 /// - `decoder`：阶段 1 的增量解码器（跨 read 保留半帧进度）；
@@ -57,8 +71,8 @@ const READ_BUF_SIZE: usize = 8 * 1024;
 /// }
 /// # Ok(()) }
 /// ```
-pub struct Connection {
-    stream: TcpStream,
+pub struct Connection<S = TcpStream> {
+    stream: S,
     decoder: FrameDecoder,
     read_buf: Box<[u8; READ_BUF_SIZE]>,
     write_buf: BytesMut,
@@ -66,16 +80,18 @@ pub struct Connection {
     pending: VecDeque<Frame>,
 }
 
-impl Connection {
+/// 通用流的核心实现：只依赖 `AsyncRead + AsyncWrite + Unpin`
+/// （`Unpin` 是流式 API 的常规边界；tokio 自身的流都满足）。
+impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
     /// 包装一条已建立的连接（默认单帧上限，见 `DEFAULT_MAX_FRAME_LEN`）。
     #[must_use]
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: S) -> Self {
         Self::with_max_frame_len(stream, DEFAULT_MAX_FRAME_LEN)
     }
 
     /// 包装一条已建立的连接，并指定单帧上限。
     #[must_use]
-    pub fn with_max_frame_len(stream: TcpStream, max_frame_len: usize) -> Self {
+    pub fn with_max_frame_len(stream: S, max_frame_len: usize) -> Self {
         Self {
             stream,
             decoder: FrameDecoder::with_max_frame_len(max_frame_len),
@@ -83,25 +99,6 @@ impl Connection {
             write_buf: BytesMut::new(),
             pending: VecDeque::new(),
         }
-    }
-
-    /// 主动连接到 `addr`（如 `"127.0.0.1:8080"`）。
-    ///
-    /// # Errors
-    ///
-    /// 连接失败（服务不可达、拒绝连接等）时返回 [`TransportError::Io`]。
-    pub async fn connect(addr: &str) -> Result<Self, TransportError> {
-        let stream = TcpStream::connect(addr).await?;
-        Ok(Self::new(stream))
-    }
-
-    /// 对端地址（日志与连接管理用）。
-    ///
-    /// # Errors
-    ///
-    /// 仅在 socket 已进入异常状态时失败。
-    pub fn peer_addr(&self) -> std::io::Result<SocketAddr> {
-        self.stream.peer_addr()
     }
 
     /// 读出一个完整帧；`Ok(None)` 表示对端正常关闭（读到 FIN）。
@@ -122,8 +119,8 @@ impl Connection {
     /// 编码并写出一个帧。
     ///
     /// 编码进入复用的 `write_buf` 后一次 `write_all` 写出，并显式 flush——
-    /// `TcpStream` 没有用户态缓冲，flush 实际是 no-op，
-    /// 但保持「任何 `AsyncWrite` 实现都正确」的通用语义。
+    /// 底层流可能带用户态缓冲（TLS 记录层就是），flush 保持
+    /// 「任何 `AsyncWrite` 实现都正确」的通用语义。
     ///
     /// # Errors
     ///
@@ -134,11 +131,15 @@ impl Connection {
 
     /// 把连接拆成读、写两个**独立所有权**的半部。
     ///
-    /// 拆分后两者无共享状态，可安全地交给不同 task——
+    /// 拆分后两者可安全地交给不同 task——
     /// 网关的标准布局：读循环 task + 写 actor task（见 [`crate::gateway`]）。
+    ///
+    /// 用 `tokio::io::split`（BiLock 半部）而不是 `TcpStream::into_split`
+    /// （Owned 半部）：前者对任何 `AsyncRead + AsyncWrite` 都可用——
+    /// TLS 流、QUIC 流与裸 TCP 走同一条拆分路径（取舍见模块文档）。
     #[must_use]
-    pub fn into_split(self) -> (ReadHalf, WriteHalf) {
-        let (read, write) = self.stream.into_split();
+    pub fn into_split(self) -> (ReadHalf<tokio::io::ReadHalf<S>>, WriteHalf<tokio::io::WriteHalf<S>>) {
+        let (read, write) = tokio::io::split(self.stream);
         (
             ReadHalf {
                 stream: read,
@@ -152,7 +153,7 @@ impl Connection {
 
     /// `read_frame` 的共享实现（`Connection` 与 `ReadHalf` 逻辑完全一致）。
     async fn read_one(
-        stream: &mut TcpStream,
+        stream: &mut S,
         decoder: &mut FrameDecoder,
         read_buf: &mut [u8; READ_BUF_SIZE],
         pending: &mut VecDeque<Frame>,
@@ -175,7 +176,7 @@ impl Connection {
 
     /// `write_frame` 的共享实现。
     async fn write_one(
-        stream: &mut TcpStream,
+        stream: &mut S,
         write_buf: &mut BytesMut,
         frame: &Frame,
     ) -> Result<(), TransportError> {
@@ -189,15 +190,38 @@ impl Connection {
     }
 }
 
+/// 裸 TCP 专属能力：主动连接与对端地址（TLS 流的握手在 [`crate::tls`]，
+/// peer 地址从 TcpStream 拿一次带进去即可）。
+impl Connection<TcpStream> {
+    /// 主动连接到 `addr`（如 `"127.0.0.1:8080"`）。
+    ///
+    /// # Errors
+    ///
+    /// 连接失败（服务不可达、拒绝连接等）时返回 [`TransportError::Io`]。
+    pub async fn connect(addr: &str) -> Result<Self, TransportError> {
+        let stream = TcpStream::connect(addr).await?;
+        Ok(Self::new(stream))
+    }
+
+    /// 对端地址（日志与连接管理用）。
+    ///
+    /// # Errors
+    ///
+    /// 仅在 socket 已进入异常状态时失败。
+    pub fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+        self.stream.peer_addr()
+    }
+}
+
 /// 连接的读半部：只能读帧（由 [`Connection::into_split`] 产生）。
-pub struct ReadHalf {
-    stream: OwnedReadHalf,
+pub struct ReadHalf<R> {
+    stream: R,
     decoder: FrameDecoder,
     read_buf: Box<[u8; READ_BUF_SIZE]>,
     pending: VecDeque<Frame>,
 }
 
-impl ReadHalf {
+impl<R: AsyncRead + Unpin> ReadHalf<R> {
     /// 读出一个完整帧；`Ok(None)` 表示对端正常关闭。
     ///
     /// 语义与 [`Connection::read_frame`] 完全一致——半部只是所有权的拆分，
@@ -222,12 +246,12 @@ impl ReadHalf {
 }
 
 /// 连接的写半部：只能写帧（由 [`Connection::into_split`] 产生）。
-pub struct WriteHalf {
-    stream: OwnedWriteHalf,
+pub struct WriteHalf<W> {
+    stream: W,
     write_buf: BytesMut,
 }
 
-impl WriteHalf {
+impl<W: AsyncWrite + Unpin> WriteHalf<W> {
     /// 编码并写出一个帧。
     ///
     /// 语义与 [`Connection::write_frame`] 完全一致。

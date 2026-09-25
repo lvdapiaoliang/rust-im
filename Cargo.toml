@@ -67,6 +67,23 @@ tower-http = { version = "0.6", features = ["cors"] }
 tokio-test = "0.4"
 tokio-tungstenite = "0.26"
 
+# ---- 加密（阶段 12：TLS + E2EE，im-crypto / im-transport）----
+# provider 一律 ring：aws-lc-rs（rustls 默认）在 Windows 需要 NASM/CMake
+# 编译链，ring 是纯 Rust+汇编、MSVC 开箱即用——本项目面向学习与跨平台，
+# 选“能被任何人一键构建”的那一个（性能差异对本项目不构成决策点）。
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "log"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+# rcgen：自签证书生成（演示/测试口径；生产用 Let's Encrypt 等真 CA）
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+# E2EE 原语：X25519（密钥协商）+ Ed25519（预密钥签名）+ HKDF-SHA256（链式推导）
+# + AES-256-GCM（消息封装）。协议编排（X3DH/双棘轮）手写，原语用审计过的库——
+# 与阶段 9 手写 HMAC 同一条边界：造轮子的价值在协议层理解，不在重写分组密码。
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hkdf = "0.12"
+aes-gcm = "0.10"
+zeroize = "1"
+
 # ---- 系统接口（im-bench 连接风暴：源地址绑定的先 bind 后 connect）----
 socket2 = "0.6"
 

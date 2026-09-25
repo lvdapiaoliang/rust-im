@@ -12,3 +12,15 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
+# ---- TLS 材料（阶段 12：自签证书生成 + rustls 配置构造）----
+rustls.workspace = true
+tokio-rustls.workspace = true
+rcgen.workspace = true
+# ---- E2EE 原语（阶段 12：X3DH + 双棘轮，协议编排手写）----
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+hkdf.workspace = true
+aes-gcm.workspace = true
+sha2.workspace = true
+rand.workspace = true
+zeroize.workspace = true

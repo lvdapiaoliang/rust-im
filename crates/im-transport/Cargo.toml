@@ -15,6 +15,10 @@ bytes.workspace = true
 im-protocol.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+# 阶段 12 TLS：材料（证书/配置）来自 im-crypto，装配（TcpStream → TLS 流 → 帧流）在这里
+im-crypto.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
