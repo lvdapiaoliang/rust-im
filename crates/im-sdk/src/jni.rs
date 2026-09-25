@@ -32,7 +32,7 @@ use std::ffi::c_void;
 use std::ptr;
 
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
-use jni::sys::{jbyteArray, jint, jlong, jobject};
+use jni::sys::{jbyteArray, jint, jlong, jobject, jstring};
 use jni::{JNIEnv, JavaVM};
 
 use crate::core::{ImSdkEvent, SdkClient, EventCallback};
@@ -78,16 +78,16 @@ extern "C" fn jni_event_shim(event: *mut ImSdkEvent, user_data: *mut c_void) {
     // 泵线程存活期间有效（nativeDestroy 在 join 泵之后才回收它）
     let bridge = unsafe { &*(user_data as *const JniEventBridge) };
 
-    // 1. 事件泵线程不在 JVM 里：attach（guard drop 时自动 detach）
+    // 1. 事件泵线程不在 JVM 里：attach（AttachGuard，drop 时自动 detach）。
+    //    guard 通过 DerefMut 暴露 JNIEnv。
     let Ok(mut env_guard) = bridge.vm.attach_current_thread() else {
         eprintln!("im-sdk jni: attach_current_thread 失败，事件被丢弃");
         return;
     };
-    // SAFETY: guard 活到本函数尾（不会中途 detach），借用期间环境有效
-    let env = unsafe { env_guard.borrow_env() };
+    let env = &mut *env_guard;
 
     // 2. C 事件 → Java Event（拷贝进 JVM 堆——free 义务到此与 Java 无关）
-    let Some(event_obj) = build_java_event(&env, event) else {
+    let Some(event_obj) = build_java_event(env, event) else {
         eprintln!("im-sdk jni: 构造 Event 失败，事件被丢弃");
         return;
     };
@@ -110,7 +110,10 @@ extern "C" fn jni_event_shim(event: *mut ImSdkEvent, user_data: *mut c_void) {
 }
 
 /// 把 C 事件结构拷贝成 `im.sdk.Sdk$Event`（字段 + byte[] data）。
-fn build_java_event<'local>(env: &JNIEnv<'local>, event: *mut ImSdkEvent) -> Option<JObject<'local>> {
+fn build_java_event<'local>(
+    env: &mut JNIEnv<'local>,
+    event: *mut ImSdkEvent,
+) -> Option<JObject<'local>> {
     // SAFETY: 泵在 alloc 后、free 前调用本函数（作用域契约）
     let e = unsafe { &*event };
     let data = if e.data.is_null() {
@@ -140,10 +143,9 @@ fn build_java_event<'local>(env: &JNIEnv<'local>, event: *mut ImSdkEvent) -> Opt
 /// `Sdk.nativeVersion() -> String`：SDK 版本（运行时兼容性检查入口）。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_im_sdk_Sdk_nativeVersion(
-    mut env: JNIEnv<'_>,
+    env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
-    use jni::sys::jstring;
     match env.new_string(SDK_VERSION) {
         Ok(s) => s.into_raw(),
         // new_string 失败 = OOM 级别的 JVM 故障：返回 null，让 Java 侧 NPE 提前暴露
@@ -164,13 +166,13 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeCreate(
     data_dir: JObject<'_>,
     callback: JObject<'_>,
 ) -> jlong {
-    // JString 取内容：env.get_string 内部做 UTF-16 → UTF-8 的规范转换
-    // （避开 GetStringUTFChars 的 modified-UTF-8 陷阱）
+    // JString 取内容：get_string 返回 JavaStr（内部经 cesu8 把
+    // modified UTF-8 解回标准 UTF-8——避开 GetStringUTFChars 裸指针的陷阱）
     let (Ok(addr), Ok(token)) = (env.get_string(&addr), env.get_string(&token)) else {
         let _ = env.throw_new("java/lang/IllegalArgumentException", "invalid string argument");
         return 0;
     };
-    let (addr, token) = (addr.to_string(), token.to_string());
+    let (addr, token) = (String::from(addr), String::from(token));
     if addr.is_empty() || token.is_empty() {
         let _ = env.throw_new("java/lang/IllegalArgumentException", "addr/token must not be empty");
         return 0;
@@ -180,11 +182,13 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeCreate(
     let data_dir: Option<String> = if data_dir.is_null() {
         None
     } else {
-        let Ok(dir) = env.get_string(&JString::from(data_dir)) else {
+        // 先绑定再借用：JString::from 产生的临时值必须活到 get_string 结束
+        let dir_string = JString::from(data_dir);
+        let Ok(dir) = env.get_string(&dir_string) else {
             let _ = env.throw_new("java/lang/IllegalArgumentException", "dataDir is not a String");
             return 0;
         };
-        Some(dir.to_string())
+        Some(String::from(dir))
     };
 
     // 回调：非 null → GlobalRef + JavaVM 打包成事件桥，塞给 C 泵当 user_data
@@ -220,17 +224,17 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeCreate(
     };
     let dir_c = data_dir.and_then(|d| std::ffi::CString::new(d).ok());
 
-    // SAFETY: 三个字符串都是刚构造的 NUL 结尾 CString；cb 形态精确匹配
-    let client = unsafe {
-        im_sdk_client_create(
-            addr_c.as_ptr(),
-            u64::try_from(user_id).unwrap_or(0),
-            token_c.as_ptr(),
-            dir_c.as_ref().map_or(ptr::null(), |d| d.as_ptr()),
-            cb,
-            ctx,
-        )
-    };
+    // SAFETY: 三个字符串都是刚构造的 NUL 结尾 CString；cb 形态精确匹配。
+    // （create/poll/destroy 等都是「安全表面 + 调用方契约」的 extern "C" fn，
+    //   安全义务在文档里，不在 unsafe 块里。）
+    let client = im_sdk_client_create(
+        addr_c.as_ptr(),
+        u64::try_from(user_id).unwrap_or(0),
+        token_c.as_ptr(),
+        dir_c.as_ref().map_or(ptr::null(), |d| d.as_ptr()),
+        cb,
+        ctx,
+    );
     if client.is_null() {
         // 装配失败的分支：事件桥不能漏（SDK 侧 create 未接管就退出）
         if !ctx.is_null() {
@@ -262,7 +266,9 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeSend(
     let content = if data.is_null() {
         Vec::new()
     } else {
-        match env.convert_byte_array(&JByteArray::from(data)) {
+        // SAFETY: data 是 JVM 传入的合法 jbyteArray（方法签名由 JVM 保证类型）
+        let arr = unsafe { JByteArray::from_raw(data) };
+        match env.convert_byte_array(&arr) {
             Ok(v) => v,
             Err(_) => {
                 let _ = env.throw_new("java/lang/RuntimeException", "convert_byte_array failed");
@@ -270,15 +276,13 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeSend(
             }
         }
     };
-    // SAFETY: 句柄契约——nativeCreate 产出、close 之前、无并发 close
-    let rc = unsafe {
-        im_sdk_client_send(
-            handle.client,
-            u64::try_from(to).unwrap_or(0),
-            content.as_ptr().cast::<u8>(),
-            content.len(),
-        )
-    };
+    // 句柄契约：nativeCreate 产出、close 之前、无并发 close
+    let rc = im_sdk_client_send(
+        handle.client,
+        u64::try_from(to).unwrap_or(0),
+        content.as_ptr().cast::<u8>(),
+        content.len(),
+    );
     if rc != error::OK {
         // SAFETY: 错误串是 SDK 静态字符串（NUL 结尾、进程常驻）
         let msg = unsafe { str_from_c(im_sdk_error_string(rc)) }
@@ -301,13 +305,15 @@ pub extern "system" fn Java_im_sdk_Sdk_nativePoll(
     };
 
     let mut raw: *mut ImSdkEvent = ptr::null_mut();
-    // SAFETY: 句柄契约同 send；out 指向栈上局部变量
-    let rc = unsafe {
-        im_sdk_client_poll_event(handle.client, &mut raw, u32::try_from(timeout_ms).unwrap_or(0))
-    };
+    // 句柄契约同 send；out 指向栈上局部变量
+    let rc = im_sdk_client_poll_event(
+        handle.client,
+        &mut raw,
+        u32::try_from(timeout_ms).unwrap_or(0),
+    );
     match rc {
         error::OK => {
-            let event = build_java_event(&env, raw);
+            let event = build_java_event(&mut env, raw);
             // SAFETY: poll 成功即移交了所有权——拷贝完必须回收（谁分配谁释放）
             unsafe { im_sdk_event_free(raw) };
             match event {
@@ -347,8 +353,8 @@ pub extern "system" fn Java_im_sdk_Sdk_nativeClose(
     // 此处 take 回所有权后指针不再复用
     let handle = unsafe { Box::from_raw(handle as *mut JniHandle) };
     // 1. 销毁客户端：内部 trigger shutdown → join 事件泵 → drop 运行时
-    // SAFETY: 句柄来自 nativeCreate 且未销毁过
-    unsafe { im_sdk_client_destroy(handle.client) };
+    //    （句柄契约：nativeCreate 产出且未销毁过）
+    im_sdk_client_destroy(handle.client);
     // 2. 泵已 join：回收事件桥（GlobalRef 随 Box drop 一起释放）
     if !handle.callback_ctx.is_null() {
         // SAFETY: ctx 是 nativeCreate 的 Box::into_raw(JniEventBridge) 产物，
