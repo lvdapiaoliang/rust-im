@@ -962,8 +962,10 @@ name = "im-bench"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
  "im-protocol",
+ "im-server",
  "im-transport",
  "tokio",
 ]

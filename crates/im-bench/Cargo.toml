@@ -13,6 +13,10 @@ workspace = true
 [dependencies]
 im-protocol.workspace = true
 im-transport.workspace = true
+# 压测要驱动真实扇出引擎（GroupHub actor + Sessions::fanout_one），
+# 会话核心是必依赖——成员表来源用内存实现（MemberSource），不连库
+im-server.workspace = true
+bytes.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 clap = { version = "4", features = ["derive"] }

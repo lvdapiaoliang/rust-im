@@ -49,7 +49,10 @@
 //! - **写时失效（invalidate-on-write）**：缓存一致性策略——DB 是
 //!   真相源，写路径（REST 加人）负责打脏缓存，读路径（actor）重载；
 //! - **接口隔离**：hub 实现 [`GroupRouter`] 只暴露 `route` 一个方法给
-//!   会话核心；`invalidate`/`stats` 是 web 层的私交。
+//!   会话核心；`invalidate`/`stats` 是 web 层的私交；
+//! - **依赖倒置（再一次）**：成员表来源抽象成 [`MemberSource`]——
+//!   [`GroupStore`] 是 DB 实现，压测（`im-bench`）与无 DB 测试用
+//!   内存实现，扇出引擎对「成员表在哪」零假设。
 //!
 //! # 已知取舍（诚实的账单）
 //!
@@ -61,6 +64,8 @@
 //!   离线成员），慢消费者本轮丢失，后续阶段补同步游标。
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -69,7 +74,7 @@ use tokio::sync::mpsc;
 
 use crate::session::{FanoutOutcome, GroupRouter, RouteFuture, Sessions};
 
-use super::groups::GroupStore;
+use super::groups::{GroupError, GroupStore};
 
 /// 每群 actor 的收件箱容量。
 ///
@@ -86,6 +91,29 @@ enum Job {
     },
     /// 成员表已变更（REST 加人后调用）：快照置脏，下条消息前重载。
     Invalidate,
+}
+
+/// 成员表来源：扇出中枢的唯一外部数据依赖（DB 只是其中一种实现）。
+///
+/// 阶段 7 压测（`im-bench` 的 `group-fanout` 场景）要驱动**真实扇出
+/// 引擎**而不连库——把「成员表在哪」抽象成 trait，与
+/// [`crate::session::GroupRouter`] 同一手法：核心定契约，外面换实现。
+/// 热路径本来就不碰它（成员快照只装载一次），所以替换来源不影响
+/// 测量口径。
+pub trait MemberSource: Send + Sync {
+    /// 全量成员 ID 快照（空 = 群不存在；仅在孵化/重载时被调用）。
+    fn list_members(&self, group_id: u64) -> MemberList<'_>;
+}
+
+/// [`MemberSource::list_members`] 的返回形态（装箱 future，trait 可作 `dyn`）。
+pub type MemberList<'a> =
+    Pin<Box<dyn Future<Output = Result<Vec<u64>, GroupError>> + Send + 'a>>;
+
+// DB 实现：仓储的固有 async 方法摆进 trait（与 GroupRouter 的 hub 实现同一换法）。
+impl MemberSource for GroupStore {
+    fn list_members(&self, group_id: u64) -> MemberList<'_> {
+        Box::pin(GroupStore::list_members(self, group_id))
+    }
 }
 
 /// 单群统计（诊断与压测的口径；原子计数，actor 与读者无锁并行）。
@@ -112,8 +140,8 @@ struct GroupActor {
 
 /// 群扇出中枢：`group_id → actor` 的注册表 + 未命中时的孵化器。
 pub struct GroupHub {
-    /// 群仓储（快照装载与重载）。
-    store: GroupStore,
+    /// 成员表来源（快照装载与重载；DB 实现是 [`GroupStore`]）。
+    source: Arc<dyn MemberSource>,
     /// 会话中心（扇出投递的执行面）。
     sessions: Sessions,
     /// actor 注册表。`std::sync::Mutex`：微秒级临界区（查/插一个条目），
@@ -127,7 +155,7 @@ impl Clone for GroupHub {
     fn clone(&self) -> Self {
         let actors = self.actors.lock().expect("扇出中枢锁中毒").clone();
         Self {
-            store: self.store.clone(),
+            source: Arc::clone(&self.source),
             sessions: self.sessions.clone(),
             actors: Mutex::new(actors),
         }
@@ -146,10 +174,17 @@ impl std::fmt::Debug for GroupHub {
 }
 
 impl GroupHub {
-    /// 创建中枢（不连库、不起 actor——全部惰性：首条群消息才孵化）。
+    /// 创建中枢（DB 成员源；不起 actor——全部惰性：首条群消息才孵化）。
     #[must_use]
     pub fn new(store: GroupStore, sessions: Sessions) -> Self {
-        Self { store, sessions, actors: Mutex::new(HashMap::new()) }
+        Self::with_source(Arc::new(store), sessions)
+    }
+
+    /// 用自定义成员源创建中枢：压测与无 DB 测试的装配点
+    /// （[`MemberSource`] 的存在理由，见 trait 文档）。
+    #[must_use]
+    pub fn with_source(source: Arc<dyn MemberSource>, sessions: Sessions) -> Self {
+        Self { source, sessions, actors: Mutex::new(HashMap::new()) }
     }
 
     /// 取群 actor（克隆句柄、立刻放锁——与 `Router::get` 同一纪律）。
@@ -162,7 +197,7 @@ impl GroupHub {
         let (tx, rx) = mpsc::channel(ACTOR_INBOX_CAPACITY);
         let stats = Arc::new(GroupStats::default());
         tokio::spawn(actor_loop(
-            self.store.clone(),
+            Arc::clone(&self.source),
             self.sessions.clone(),
             group_id,
             members,
@@ -224,11 +259,11 @@ impl GroupRouter for GroupHub {
                 return self.enqueue(actor, &msg).await;
             }
 
-            // 慢路径：首条群消息 → 查库装载成员快照，孵化 actor。
+            // 慢路径：首条群消息 → 查成员源装载快照，孵化 actor。
             // 空 = 不是群：建群事务保证群主必在成员表，空表即群不存在。
-            // 查库失败也回落 false（单聊投递）——DB 故障时的降级
+            // 装载失败也回落 false（单聊投递）——DB 故障时的降级
             // 比吞消息便宜（消息落离线队列，等库恢复）。
-            let members = match self.store.list_members(to).await {
+            let members = match self.source.list_members(to).await {
                 Ok(members) if !members.is_empty() => members,
                 _ => return false,
             };
@@ -243,7 +278,7 @@ impl GroupRouter for GroupHub {
 /// 生命周期 = hub 的注册项存活期（本阶段不退役，见模块文档）；
 /// 收件箱关闭（hub drop，即整个服务停机）时 `recv` 返回 `None` 自然退出。
 async fn actor_loop(
-    store: GroupStore,
+    source: Arc<dyn MemberSource>,
     sessions: Sessions,
     group_id: u64,
     mut members: Vec<u64>,
@@ -258,7 +293,7 @@ async fn actor_loop(
             Job::Fanout { msg } => {
                 if dirty {
                     // 重载失败保旧快照：可用性优先（见模块文档的取舍）
-                    if let Ok(fresh) = store.list_members(group_id).await {
+                    if let Ok(fresh) = source.list_members(group_id).await {
                         members = fresh;
                     }
                     dirty = false;
@@ -538,5 +573,40 @@ mod tests {
             let decoded = Msg::decode_frame(&frame).expect("载荷应与命令字匹配");
             assert_eq!(decoded.msg_id, expected, "fast 的消息完整且有序");
         }
+    }
+
+    /// 内存成员源：固定成员表，无 DB 装配（`with_source` 路径的主线验证）。
+    ///
+    /// 上面四个测试都要 PG；这个测试在任何环境都跑得动——守住
+    /// trait 装配不被改坏，也是 `im-bench` 同款装配的单元级影子。
+    #[derive(Debug)]
+    struct MemSource(Vec<u64>);
+
+    impl MemberSource for MemSource {
+        fn list_members(&self, _group_id: u64) -> MemberList<'_> {
+            let members = self.0.clone();
+            Box::pin(async move { Ok::<Vec<u64>, GroupError>(members) })
+        }
+    }
+
+    /// 内存成员源 + `with_source` 装配：不连库也能孵化 actor 并扇出。
+    #[tokio::test]
+    async fn in_memory_source_fans_out_without_db() {
+        let sessions = Sessions::new(SessionConfig::default());
+        let hub = GroupHub::with_source(Arc::new(MemSource(vec![101, 102, 103])), sessions.clone());
+
+        // 发送者 999 不是成员：delivered 口径就是成员数，账目干净
+        let msg = Msg {
+            from: 999,
+            to: 7,
+            msg_id: 1,
+            client_msg_id: 1,
+            content: Bytes::from_static(b"mem"),
+        };
+        assert!(hub.route(7, &msg).await, "内存源非空，应被扇出路径接管");
+
+        wait_stats(&hub, 7, "三成员送达", |s| s.delivered.load(Ordering::Relaxed) == 3)
+            .await;
+        assert_eq!(hub.actor_count(), 1, "内存源孵化了一个 actor");
     }
 }
