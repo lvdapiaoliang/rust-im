@@ -1,0 +1,7 @@
+﻿
+crates\im-client\src\client.rs:13://!     │                    │ 每轮连接：spawn_gateway（心跳/写actor）
+crates\im-client\src\client.rs:39:    shutdown_channel, spawn_gateway,
+crates\im-client\src\client.rs:369:    let (handle, gateway_task) = spawn_gateway(stream, gateway_config, frame_tx, loc
+al_shutdown_rx);
+
+
