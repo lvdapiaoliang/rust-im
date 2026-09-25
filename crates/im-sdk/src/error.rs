@@ -80,7 +80,7 @@ mod tests {
             assert!(!error_string(code).is_empty());
         }
     }
-    
+
     /// 未定义码（含负数）落到统一兜底，绝不 panic 越界。
     #[test]
     fn unknown_codes_fall_back() {

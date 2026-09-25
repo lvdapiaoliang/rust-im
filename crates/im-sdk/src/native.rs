@@ -23,10 +23,10 @@
 //! # 诚实边界：类型编码「协议阶段」，不编码「链路活性」
 //!
 //! `Connected` 类型证明的是**握手已完成**（服务端已发 `Connected` 事件、
-//! session_id 已知），不是「网线此刻是通的」——断线重连是 `im-client`
+//! `session_id` 已知），不是「网线此刻是通的」——断线重连是 `im-client`
 //! 状态机的内部职责（`Disconnected` 事件只作通知），且断线后 `send`
 //! 本来就合法（入离线队列、重连后补投，这正是 im-client 的语义）。
-//! 类型状态收走的是更基本的错误：**连握手都没完成**（连 session_id
+//! 类型状态收走的是更基本的错误：**连握手都没完成**（连 `session_id`
 //! 都没有）就发消息。想用类型编码链路活性，就会撞上「类型不能随
 //! 网络事件回退」的硬墙——那是运行时状态，别让类型系统背它背不动的锅。
 //!
@@ -41,7 +41,7 @@
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
-use crate::core::{self, ImSdkEvent, SdkClient, EVENT_CONNECTED, EVENT_REJECTED};
+use crate::core::{self, EVENT_CONNECTED, EVENT_REJECTED, ImSdkEvent, SdkClient};
 use crate::error;
 use crate::ffi;
 
@@ -118,6 +118,9 @@ impl TypedSdkClient<Disconnected> {
     /// - `(client, `[`error::ERR_HANDSHAKE_REJECTED`]`)`：握手被拒——
     ///   拿回去 `destroy`；
     /// - `(client, `[`error::ERR_STOPPED`]`)`：状态机已落幕（通道关闭）。
+    // clippy 认为 Err 带整个客户端「太大」——这正是错误归还模式的本体：
+    // 失败不吞资源，客户端必须物归原主。大小是故意的，不是疏忽。
+    #[allow(clippy::result_large_err)]
     pub fn wait_connected(
         mut self,
         timeout: Duration,
@@ -146,12 +149,12 @@ impl TypedSdkClient<Disconnected> {
                         // 终局拒绝：归还整个客户端
                         Err(Some(code)) => return Err((self, code)),
                         // 非目标事件（闪断等）：继续等，预算已在循环头扣减
-                        Err(None) => continue,
+                        Err(None) => {}
                     }
                 }
                 // poll 超时（Ok(None)）：大概率 remaining 先到，循环头会收口；
                 // 若 poll 提前返回也继续等剩余预算
-                Ok(None) => continue,
+                Ok(None) => {}
                 // 状态机落幕（或互斥违例）：归还，让调用方收尾
                 Err(code) => return Err((self, code)),
             }
@@ -224,9 +227,9 @@ impl<State> TypedSdkClient<State> {
 mod tests {
     use super::*;
     use crate::core::EVENT_MESSAGE;
-    use crate::testutil::{borrow, spawn_picky_server, spawn_test_server, TestServer, WAIT};
+    use crate::testutil::{TestServer, WAIT, borrow, spawn_picky_server, spawn_test_server};
 
-    /// 主线：new → wait_connected → 双客户端互发，send 只在 Connected 上可用。
+    /// 主线：new → `wait_connected` → 双客户端互发，send 只在 Connected 上可用。
     #[test]
     fn typed_flow_connects_then_sends() {
         let srv: TestServer = spawn_test_server(im_server::SessionConfig::default());
@@ -269,11 +272,10 @@ mod tests {
         let addr = srv.addr.clone();
 
         let client = TypedSdkClient::new(&addr, 1, "demo", None).unwrap();
-        // expect_err 需要 Ok 侧 Debug——句柄故意不实现 Debug（不打印不复制），
-        // 错误路径用手写 match 拆包
-        let (client, code) = match client.wait_connected(WAIT) {
-            Ok(_) => panic!("错误口令的握手必须失败"),
-            Err(returned) => returned,
+        // expect/expect_err 都被句柄的「故意无 Debug」拦下（不打印不复制），
+        // 错误路径用 let-else 拆包
+        let Err((client, code)) = client.wait_connected(WAIT) else {
+            panic!("错误口令的握手必须失败");
         };
         assert_eq!(code, error::ERR_HANDSHAKE_REJECTED);
         // 归还的客户端仍能干净销毁——错误路径的资源闭环
@@ -286,9 +288,8 @@ mod tests {
         // 端口 9（discard 服务）在本机开发环境几乎必然无人监听：
         // 连接失败 → 状态机持续重连 → 预算内不会有 Connected 事件
         let client = TypedSdkClient::new("127.0.0.1:9", 1, "demo", None).unwrap();
-        let (client, code) = match client.wait_connected(Duration::from_millis(300)) {
-            Ok(_) => panic!("无人监听的地址必然等不到握手"),
-            Err(returned) => returned,
+        let Err((client, code)) = client.wait_connected(Duration::from_millis(300)) else {
+            panic!("无人监听的地址必然等不到握手");
         };
         assert_eq!(code, error::ERR_TIMEOUT);
         client.destroy();

@@ -1,8 +1,8 @@
 //! 测试脚手架（`#[cfg(test)]` 专用）：供 `core`/`native` 等模块的测试共用。
 //!
-//! 独立成模块而不是各测试文件各写一份：服务端装配（runtime + 监听地址
-//! + Sessions 句柄）是每个端到端测试的同一套前奏——重复三遍之后，
-//! 「谁持有服务端生命周期」的纪律就会开始走样。
+//! 独立成模块而不是各测试文件各写一份：服务端装配（runtime、监听
+//! 地址、Sessions 句柄）是每个端到端测试的同一套前奏——重复三遍
+//! 之后，「谁持有服务端生命周期」的纪律就会开始走样。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,9 +30,8 @@ pub(crate) struct TestServer {
 /// 起一个默认口令（"demo"）的测试服务端。
 pub(crate) fn spawn_test_server(config: SessionConfig) -> TestServer {
     let rt = Runtime::new().expect("测试服务端运行时应能创建");
-    let (addr, sessions, shutdown) = rt
-        .block_on(async { im_server::spawn_server(config).await })
-        .expect("测试服务端应能启动");
+    let (addr, sessions, shutdown) =
+        rt.block_on(async { im_server::spawn_server(config).await }).expect("测试服务端应能启动");
     TestServer { _rt: rt, addr: addr.to_string(), _sessions: sessions, _shutdown: shutdown }
 }
 
