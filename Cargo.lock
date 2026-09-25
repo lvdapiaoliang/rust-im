@@ -1220,7 +1220,6 @@ dependencies = [
  "rustls",
  "sha2",
  "thiserror 2.0.21",
- "tokio-rustls",
  "x25519-dalek",
  "zeroize",
 ]
