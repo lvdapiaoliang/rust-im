@@ -284,7 +284,7 @@ mod tests {
     use super::*;
     use crate::web::db::testing::{pool_or_skip, test_sessions};
 
-    /// 雪花发号器（测试专用实例，每次分配唯一 machine_id——并行测试不撞库）。
+    /// 雪花发号器（测试专用实例，每次分配唯一 `machine_id`——并行测试不撞库）。
     fn ids() -> Sessions {
         test_sessions()
     }
