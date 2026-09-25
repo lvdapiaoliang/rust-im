@@ -613,6 +613,33 @@ ANSI/GBK 解码（PS 7+ 才默认 UTF-8）——中文的 UTF-8 字节被按 GBK
 跨编码边界的两条铁律：输出重定向到文件再读（§6.2），输入用码位
 构造（本条）。
 
+### 6.7 GitHub service container 只支持 Linux runner：放进三平台矩阵，windows/macos 腿直接失败【阶段 14 CI】
+
+**现象**：ci.yml 里 `test` job 用 `matrix.os: [ubuntu, windows, macos]`
+三平台跑测试，为兑现「CI 配真库补盲区」在 job 级别挂了
+`services: postgres`。本地 YAML 校验、`cargo test` 全绿，push 后
+Actions 上 windows/macos 两条腿**在跑任何 step 之前就失败**：
+windows 报 `Container operations are only supported on Linux runners`，
+macos 报 `docker: command not found`。
+
+**根因**：GitHub 的 service container 依赖 Docker，而**托管 runner 里
+只有 Linux 提供 Docker**——windows/macos runner 根本没有容器运行时。
+`services:` 是 **job 级别**的键，被 matrix 每条腿无条件继承；它不是
+「连不上就优雅跳过」，而是 job 启动阶段拉容器就报错，**整个 job 直接挂**
+（比测试失败更早，连 checkout 都到不了）。
+
+**修复**：把「验平台工具链」和「跑真库测试」拆成两个 job——
+`test`（三平台矩阵，**不挂 service**，DB 测试靠 `pool_or_skip` 空转跳过）
++ `test-postgres`（**ubuntu-only**，挂 postgres service + DATABASE_URL
+真跑 DB 测试）。`services` 无法按 matrix 值条件化，只能靠拆 job 隔离。
+
+**教训**：这与 §6.4（本机无 Docker）是同一个物理约束的两张面孔——
+**容器 = Linux 专属运行时**。凡「配了容器/service」的 CI 步骤，默认只在
+Linux runner 成立；跨平台矩阵里挂 service，等于给非 Linux 腿判死刑。
+CI 配置的「本地全绿」只证明 YAML 合法 + 命令能跑，**证明不了 runner
+平台能力**——这正是 §6.4「诚实记录未实机验证」纪律要防的盲区，push 后
+WebFetch Actions 页面才抓出来。
+
 ---
 
 ## 七、Rust 业务开发常见错误速查表
@@ -721,10 +748,12 @@ RuntimeException ≈ anyhow（带上下文的动态错误），但 Rust 把"抛"
 阶段 14 的坑已入账：幻影错误第二次实遇（§2.1 补笔——quic_demo
 E0599，同款根因不同 crate）、PowerShell 5.1 按 ANSI 读 UTF-8 无 BOM
 脚本（§6.6）、并行集成测试共用默认 `machine_id` 撞雪花 ID（§4.8——
-CI 落地抓出的第一个真 bug）。CI/文档站的配置本身未踩新坑（YAML 用
-js-yaml 本地验证、mdbook build 本地全绿）——诚实记录：Actions 的真实
-runner 行为（postgres service 健康检查、三平台矩阵时长、Pages 部署）要
-push 后才见分晓，属未实机验证项（与 §6.4 同一纪律）。
+CI 落地抓出的第一个真 bug）、GitHub service container 只支持 Linux
+runner（§6.7——三平台矩阵挂 postgres service 让 windows/macos 腿直接
+失败，push 后 WebFetch Actions 页面抓出，已拆 job 修复）。CI/文档站的
+YAML 本地校验（js-yaml）、mdbook build 本地全绿只能证明配置合法，证明
+不了 runner 平台能力——Actions 已实机验证：§6.7 的跨平台缺陷就是这么
+抓出来并修掉的（与 §6.4 同一纪律：未实机验证项 push 后必须回看）。
 
 后续阶段踩到的新坑按同格式追加（阶段 14 工程化的坑进对应节）。坑是
 项目最有生命力的文档——**宁可文档变厚，不可经验失传**。

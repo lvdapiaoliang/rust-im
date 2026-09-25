@@ -78,9 +78,12 @@ workspace 管理（根 `Cargo.toml` 的 `[workspace.package]`，一处 bump 全 
 
 ### 阶段 14：开源工程化
 
-- GitHub Actions CI 矩阵：fmt/clippy 门槛 + 三平台测试（ubuntu 配 PostgreSQL service 真跑，
-  windows/macos 验证平台构建链）+ tls_demo/quic_demo 全链路自检
+- GitHub Actions CI 矩阵：fmt/clippy 门槛 + 三平台构建测试（ubuntu/windows/macos 验工具链，
+  DB 测试靠 pool_or_skip 空转）+ ubuntu-only postgres service 真跑 DB 测试 + tls_demo/quic_demo 全链路自检
 - 版本与发布：CHANGELOG 立账；版本号由 workspace 统一管理（`version.workspace = true` 全 crate 继承）
 - 文档站：docs/ 经 mdBook 构建发布到 GitHub Pages（`docs/SUMMARY.md` + `pages.yml`）
 - 修复（CI 落地抓出的第一个真 bug）：并行集成测试共用默认 `machine_id`，雪花 ID
   在同一毫秒撞库唯一约束（偶发失败、单跑必过）——脚手架统一发唯一 `machine_id`（docs/20 §4.8）
+- 修复（Actions 实机验证抓出）：service container 仅支持 Linux runner，postgres service
+  放在三平台矩阵 job 级别会让 windows/macos 腿启动即失败——拆为三平台矩阵（无 service）
+  + ubuntu-only 真库 job（docs/20 §6.7）

@@ -69,7 +69,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | ✅ 已完成 |
 | 12 | TLS 传输加密（rustls）+ E2EE（Signal 双棘轮）+ 类型状态原生 API（Tauri 壳诚实边界，见 docs/18 §五） | `im-crypto` + `im-transport` + `im-sdk::native` | 18 | ✅ 已完成 |
 | 13 | QUIC（quinn：多路复用/无队头阻塞，`GatewayStream` 利息兑现）+ 挂载盘语义层（im-mount：手写 LRU + 内存 FS + 目录缓存 + IM 视图映射，FUSE/WinFsp 驱动接线为诚实边界，见 docs/19 §4.6） | `im-transport::quic` + `im-mount` | 19 | ✅ 已完成 |
-| 14 | 开源工程化：CI 矩阵（fmt/clippy 门槛 + 三平台测试，ubuntu 配 PostgreSQL service 真跑）/ 版本（CHANGELOG + workspace 统一版本）/ 文档站（mdBook → GitHub Pages）；Actions 线上行为属未实机验证项（push 后见分晓，见 docs/20 §九） | `.github` + `CHANGELOG.md` + `book.toml` | — | ✅ 已完成 |
+| 14 | 开源工程化：CI 矩阵（fmt/clippy 门槛 + 三平台构建测试 + ubuntu-only PostgreSQL service 真跑 DB 测试）/ 版本（CHANGELOG + workspace 统一版本）/ 文档站（mdBook → GitHub Pages）；Actions 已实机验证：push 后 WebFetch 抓出 service container 跨平台缺陷（windows/macos runner 无 Docker）并拆 job 修复（docs/20 §6.7） | `.github` + `CHANGELOG.md` + `book.toml` | — | ✅ 已完成 |
 
 > 阶段重排说明（阶段 5 收尾时定稿）：原阶段 5~9（压测 / FFI / 桌面+E2EE /
 > QUIC / 工程化）顺延为 10~14，为 Web 接入与社交功能（好友、群组、
@@ -128,7 +128,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 压测方法、火焰图、量化优化 | 文档 16 | 阶段 10 |
 | 挂载盘（FUSE / WinFsp / 元数据缓存） | 文档 19 | 阶段 13 `im-mount` 语义层（手写 LRU 目录缓存；本机无 WinFsp 驱动，接线层诚实记录） |
 | Web 全栈（REST/WS 网关/前端状态管理） | 文档 12 | 阶段 5~9（axum + Vue 双端） |
-| CI/CD、多平台构建矩阵、版本管理 | `.github/workflows/ci.yml`（三平台矩阵 + postgres service）与 CHANGELOG.md | 阶段 14 |
+| CI/CD、多平台构建矩阵、版本管理 | `.github/workflows/ci.yml`（三平台构建矩阵 + ubuntu-only postgres service）与 CHANGELOG.md | 阶段 14 |
 
 ### 4.5 算法、数据结构与设计模式图谱
 
