@@ -18,7 +18,7 @@
 //!
 //! 网络重排/重传让消息可能乱序到达。解密方发现序号跳了，就把跳过
 //! 序号的消息密钥**先派生好存进 `skipped`**，后到的旧消息用缓存解。
-//! 上限 [`MAX_SKIP`]：一次跳太多说明对端有 bug 或在搞 DoS 扩张内存，
+//! 上限 [`MAX_SKIP`]：一次跳太多说明对端有 bug 或在搞 `DoS` 扩张内存，
 //! 拒绝比包容便宜（与 im-transport 去重窗口的「重同步而非丢弃」是
 //! 同一个防御思想的两种表达：那边防丢消息，这边防丢密钥）。
 //!
@@ -124,10 +124,7 @@ impl RatchetMessage {
         if bytes.len() < HEADER_LEN + TAG_LEN {
             return Err(CryptoError::Ratchet("密文长度不足（连标签都放不下）".into()));
         }
-        Ok(Self {
-            header,
-            ciphertext: bytes[HEADER_LEN..].to_vec(),
-        })
+        Ok(Self { header, ciphertext: bytes[HEADER_LEN..].to_vec() })
     }
 }
 
@@ -137,7 +134,7 @@ impl RatchetMessage {
 
 /// 双棘轮会话状态（一端一份，互为镜像）。
 ///
-/// 字段与 Signal 规范的 RatchetState 一一对应；
+/// 字段与 Signal 规范的 `RatchetState` 一一对应；
 /// `dh_self` 为 `None` 表示「该我发起第一轮 DH 棘轮」（Alice 初态）。
 pub struct RatchetState {
     /// 根密钥 RK：只被 DH 棘轮推进，永不直接加密消息。
@@ -148,7 +145,7 @@ pub struct RatchetState {
     dh_remote: Option<PublicKey>,
     /// 发送链密钥 CKs（`None` = 未建立：第一轮 DH 后才有）。
     chain_send: Option<[u8; KEY_LEN]>,
-    /// 接收链密钥 CKr。
+    /// 接收链密钥 `CKr`。
     chain_recv: Option<[u8; KEY_LEN]>,
     /// 发送链已用序号 Ns。
     n_send: u32,
@@ -165,7 +162,7 @@ pub struct RatchetState {
 impl Drop for RatchetState {
     /// 会话状态 drop 时擦除全部密钥材料（`StaticSecret` 自带擦除，
     /// `skipped` 里的数组不满足 `Zeroize` 派生，于是手动擦——
-    /// 宁可显式三行，也不为派生把 HashMap 换成自定义容器）。
+    /// 宁可显式三行，也不为派生把 `HashMap` 换成自定义容器）。
     fn drop(&mut self) {
         self.root_key.zeroize();
         if let Some(c) = &mut self.chain_send {
@@ -174,7 +171,7 @@ impl Drop for RatchetState {
         if let Some(c) = &mut self.chain_recv {
             c.zeroize();
         }
-        for (_, mk) in self.skipped.iter_mut() {
+        for mk in self.skipped.values_mut() {
             mk.zeroize();
         }
     }
@@ -184,7 +181,7 @@ impl RatchetState {
     /// 发起方（Alice）初始化：X3DH 的 SK + 对端（Bob）的 SPK 公钥。
     ///
     /// Alice 的 `dh_self` 为 `None`——第一条 `encrypt` 时才生成新密钥对
-    /// 并推进第一轮 DH 棘轮（规范的 RatchetInit initiator 形态）。
+    /// 并推进第一轮 DH 棘轮（规范的 `RatchetInit` initiator 形态）。
     #[must_use]
     pub fn init_initiator(sk: [u8; KEY_LEN], remote_dh: PublicKey) -> Self {
         Self {
@@ -224,6 +221,12 @@ impl RatchetState {
     /// # Errors
     ///
     /// 内部 KDF 失败（现实中不可达——输出长度都在 HKDF 上限内）。
+    ///
+    /// # Panics
+    ///
+    /// 状态机自检断言失败（发送链/DH 密钥对缺失）——仅当绕过
+    /// [`RatchetState::init_initiator`]/[`RatchetState::init_responder`]
+    /// 用非法途径构造状态时可达，正常使用不会触发。
     pub fn encrypt(
         &mut self,
         plaintext: &[u8],
@@ -258,6 +261,12 @@ impl RatchetState {
     ///
     /// - 序号跳跃超过 [`MAX_SKIP`]：拒绝（DoS 防御）；
     /// - GCM 认证失败（密文/头被篡改、消息错投到别人的会话）：拒绝。
+    ///
+    /// # Panics
+    ///
+    /// 状态机自检断言失败（远端公钥/接收链缺失）——仅当绕过
+    /// [`RatchetState::init_initiator`]/[`RatchetState::init_responder`]
+    /// 用非法途径构造状态时可达，正常使用不会触发。
     pub fn decrypt(&mut self, msg: &RatchetMessage) -> Result<Vec<u8>, CryptoError> {
         // 1. 乱序旧消息：先查跳过密钥缓存
         let key = (*msg.header.dh.as_bytes(), msg.header.n);
@@ -321,8 +330,8 @@ impl RatchetState {
         self.n_recv = 0;
 
         // 第二跳：自己的新发送链（再生成新密钥对）
-        let mut rng = rand::rngs::OsRng;
-        let new_secret = StaticSecret::random_from_rng(&mut rng);
+        let rng = rand::rngs::OsRng;
+        let new_secret = StaticSecret::random_from_rng(rng);
         let dh_out = new_secret.diffie_hellman(remote);
         let (rk, cks) = kdf_rk(&self.root_key, dh_out.as_bytes());
         self.root_key = rk;
@@ -383,7 +392,7 @@ impl RatchetState {
 // KDF 三件套（规范的 KDF_RK / KDF_CK + 消息密钥展开）
 // ────────────────────────────────────────────────────────────────
 
-/// KDF_RK：根密钥棘轮。HKDF(salt=RK, ikm=DH) → (新 RK, 新 CK)。
+/// `KDF_RK：根密钥棘轮。HKDF(salt=RK`, ikm=DH) → (新 RK, 新 CK)。
 fn kdf_rk(rk: &[u8; KEY_LEN], dh_out: &[u8]) -> ([u8; KEY_LEN], [u8; KEY_LEN]) {
     let hk = Hkdf::<Sha256>::new(Some(rk), dh_out);
     let mut okm = [0u8; 64];
@@ -395,12 +404,12 @@ fn kdf_rk(rk: &[u8; KEY_LEN], dh_out: &[u8]) -> ([u8; KEY_LEN], [u8; KEY_LEN]) {
     (rk, ck)
 }
 
-/// KDF_CK 之消息密钥：HMAC(CK, 0x01)。
+/// `KDF_CK` 之消息密钥：HMAC(CK, 0x01)。
 fn kdf_ck_mk(ck: &[u8; KEY_LEN]) -> [u8; MSG_KEY_LEN] {
     hmac_step(ck, 0x01)
 }
 
-/// KDF_CK 之链推进：HMAC(CK, 0x02)。
+/// `KDF_CK` 之链推进：HMAC(CK, 0x02)。
 fn kdf_ck_next(ck: &[u8; KEY_LEN]) -> [u8; KEY_LEN] {
     hmac_step(ck, 0x02)
 }
@@ -456,8 +465,8 @@ mod tests {
 
     /// 测试脚手架：一对已完成 X3DH 的双棘轮会话（Alice 发起方）。
     fn session_pair() -> (RatchetState, RatchetState) {
-        let mut rng = OsRng;
-        let bob_spk = StaticSecret::random_from_rng(&mut rng);
+        let rng = OsRng;
+        let bob_spk = StaticSecret::random_from_rng(rng);
         let sk = [0x42u8; KEY_LEN]; // KDF 正确性不依赖 SK 的来源，固定值足够
         let alice = RatchetState::init_initiator(sk, PublicKey::from(&bob_spk));
         let bob = RatchetState::init_responder(sk, bob_spk);
@@ -492,9 +501,9 @@ mod tests {
         let msgs: Vec<_> = (0..5)
             .map(|i| alice.encrypt(format!("burst #{i}").as_bytes(), &mut rng).unwrap())
             .collect();
-        // 序号在同一链上单调推进
+        // 序号在同一链上单调推进（usize→u32 用 try_from 收口，项目惯例）
         for (i, msg) in msgs.iter().enumerate() {
-            assert_eq!(msg.header.n, i as u32);
+            assert_eq!(msg.header.n, u32::try_from(i).unwrap());
             assert_eq!(bob.decrypt(msg).unwrap(), format!("burst #{i}").as_bytes());
         }
     }
@@ -547,7 +556,7 @@ mod tests {
     #[test]
     fn wrong_session_cannot_decrypt() {
         let (mut alice, _bob) = session_pair();
-        let carol_spk = StaticSecret::random_from_rng(&mut OsRng);
+        let carol_spk = StaticSecret::random_from_rng(OsRng);
         let mut carol = RatchetState::init_responder([0x99u8; KEY_LEN], carol_spk);
         let mut rng = OsRng;
 
@@ -572,7 +581,7 @@ mod tests {
         }
     }
 
-    /// MAX_SKIP 上限：对端声称跳了远超上限的序号 → 拒绝并报告
+    /// `MAX_SKIP` 上限：对端声称跳了远超上限的序号 → 拒绝并报告
     #[test]
     fn excessive_skip_is_rejected() {
         let (mut alice, mut bob) = session_pair();

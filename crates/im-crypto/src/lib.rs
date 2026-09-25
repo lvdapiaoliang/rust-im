@@ -16,9 +16,7 @@ pub mod e2ee;
 pub mod error;
 pub mod tls;
 
-pub use e2ee::{
-    RatchetMessage, RatchetState, SessionKey, X3dhInitiation, initiate, respond,
-};
+pub use e2ee::{RatchetMessage, RatchetState, SessionKey, X3dhInitiation, initiate, respond};
 pub use error::CryptoError;
 pub use tls::TlsMaterial;
 

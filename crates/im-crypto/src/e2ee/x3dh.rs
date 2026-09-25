@@ -31,7 +31,7 @@
 //!
 //! # 本实现的学习版简化（诚实边界）
 //!
-//! - **信任模型**：Bob 不校验 Alice 的 IK_A 真伪（生产里通过 SAFETY
+//! - **信任模型**：Bob 不校验 Alice 的 `IK_A` 真伪（生产里通过 SAFETY
 //!   NUMBER/指纹比对或信任链；学习版按 TOFU——首次使用即信任，
 //!   MITM 风险在 docs/18 §四 讨论）；
 //! - SPK 的签名**必须**校验（否则服务器可给 Alice 掉包假预密钥——
@@ -80,19 +80,13 @@ impl IdentityKeyPair {
     /// 生成新身份（一次性动作，账号生命周期内复用）。
     #[must_use]
     pub fn generate(rng: &mut (impl CryptoRng + RngCore)) -> Self {
-        Self {
-            signing: SigningKey::generate(rng),
-            dh: StaticSecret::random_from_rng(rng),
-        }
+        Self { signing: SigningKey::generate(rng), dh: StaticSecret::random_from_rng(rng) }
     }
 
     /// 身份公钥（分发给通信对端/服务器）。
     #[must_use]
     pub fn public(&self) -> IdentityPublicKey {
-        IdentityPublicKey {
-            verifying: self.signing.verifying_key(),
-            dh: PublicKey::from(&self.dh),
-        }
+        IdentityPublicKey { verifying: self.signing.verifying_key(), dh: PublicKey::from(&self.dh) }
     }
 
     /// 用身份私钥签名（SPK 背书用）。
@@ -103,13 +97,13 @@ impl IdentityKeyPair {
 
 /// 签名预密钥（Bob 侧）：由身份密钥背书的中期 DH 密钥。
 ///
-/// 签名内容是 `key_id ‖ public`——把 key_id 拴进签名，
+/// 签名内容是 `key_id ‖ public`——把 `key_id` 拴进签名，
 /// 服务器无法把 A 预密钥的签名搬到 B 预密钥上（防跨键挪用）。
 pub struct SignedPreKey {
     /// 预密钥 ID（服务器寻址/轮换管理）。
     pub key_id: u32,
     secret: StaticSecret,
-    /// 预密钥公钥（进 PreKeyBundle）。
+    /// 预密钥公钥（进 `PreKeyBundle`）。
     pub public: PublicKey,
     /// 身份密钥对 `key_id ‖ public` 的 Ed25519 签名。
     pub signature: Signature,
@@ -118,7 +112,11 @@ pub struct SignedPreKey {
 impl SignedPreKey {
     /// 生成并让身份密钥当场签名。
     #[must_use]
-    pub fn generate(identity: &IdentityKeyPair, key_id: u32, rng: &mut (impl CryptoRng + RngCore)) -> Self {
+    pub fn generate(
+        identity: &IdentityKeyPair,
+        key_id: u32,
+        rng: &mut (impl CryptoRng + RngCore),
+    ) -> Self {
         let secret = StaticSecret::random_from_rng(rng);
         let public = PublicKey::from(&secret);
         let mut signed = Vec::with_capacity(4 + 32);
@@ -156,7 +154,7 @@ impl OneTimePreKey {
 pub struct PreKeyBundle {
     /// Bob 的身份公钥。
     pub identity: IdentityPublicKey,
-    /// 签名预密钥：(key_id, 公钥, IK 签名)。
+    /// `签名预密钥：(key_id`, 公钥, IK 签名)。
     pub signed_pre_key: (u32, PublicKey, Signature),
     /// 一次性预密钥（服务器库存用尽时为 `None`）。
     pub one_time_pre_key: Option<(u32, PublicKey)>,
@@ -192,7 +190,7 @@ impl SessionKey {
 /// Alice → Bob 首条消息必须携带的协商材料（明文可见，全是公钥）。
 ///
 /// Bob 拿着它 + 自己的私钥算出与 Alice 相同的 SK。
-/// 手写紧凑编码：X25519 公钥 32B + key_id 4B，与 im-protocol 的
+/// 手写紧凑编码：X25519 公钥 32B + `key_id` 4B，与 im-protocol 的
 /// 手写字节布局同一风格（E2EE 载荷走 IM 帧 payload，能省一字节是一字节）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct X3dhInitiation {
@@ -233,7 +231,8 @@ pub fn initiate(
     let ephemeral = StaticSecret::random_from_rng(rng);
 
     // 3. 三（四）重 DH：输入顺序 = 规范规定的 DH1‖DH2‖DH3‖[DH4]
-    let ik_a = PublicKey::from(&initiator.dh);
+    //    （DH1 直接用 initiator.dh：公钥形态在这里没有额外作用，
+    //    避免「算了不用」的死变量）
     let mut ikm = Vec::with_capacity(F.len() + 4 * 32);
     ikm.extend_from_slice(&F);
     ikm.extend_from_slice(initiator.dh.diffie_hellman(spk_public).as_bytes()); // DH1
@@ -259,7 +258,7 @@ pub fn initiate(
 ///
 /// # Errors
 ///
-/// - `initiation` 引用的 SPK/OPK 与传入密钥的 key_id 不一致
+/// - `initiation` 引用的 SPK/OPK 与传入密钥的 `key_id` 不一致
 ///   （服务器错投或消息被篡改）时返回 [`CryptoError::Ratchet`]。
 pub fn respond(
     responder: &IdentityKeyPair,
@@ -291,9 +290,7 @@ pub fn respond(
     let mut ikm = Vec::with_capacity(F.len() + 4 * 32);
     ikm.extend_from_slice(&F);
     ikm.extend_from_slice(spk.secret.diffie_hellman(&initiation.initiator_identity.dh).as_bytes()); // DH1
-    ikm.extend_from_slice(
-        responder.dh.diffie_hellman(&initiation.ephemeral).as_bytes(),
-    ); // DH2
+    ikm.extend_from_slice(responder.dh.diffie_hellman(&initiation.ephemeral).as_bytes()); // DH2
     ikm.extend_from_slice(spk.secret.diffie_hellman(&initiation.ephemeral).as_bytes()); // DH3
     if let (Some(_), Some(local)) = (initiation.one_time_pre_key_id, opk) {
         ikm.extend_from_slice(local.secret.diffie_hellman(&initiation.ephemeral).as_bytes()); // DH4
@@ -337,7 +334,8 @@ impl X3dhInitiation {
     ///
     /// 长度不足或身份公钥字节非法时返回 [`CryptoError::Ratchet`]。
     pub fn decode(bytes: &[u8]) -> Result<Self, CryptoError> {
-        let err = |what: &str| CryptoError::Ratchet(format!("x3dh initiation decode failed: {what}"));
+        let err =
+            |what: &str| CryptoError::Ratchet(format!("x3dh initiation decode failed: {what}"));
         if bytes.len() < 1 + 32 + 32 + 32 + 4 {
             return Err(err("长度不足"));
         }
@@ -357,12 +355,10 @@ impl X3dhInitiation {
         } else {
             None
         };
-        let verifying = VerifyingKey::from_bytes(&verifying).map_err(|_| err("身份验证钥字节非法"))?;
+        let verifying =
+            VerifyingKey::from_bytes(&verifying).map_err(|_| err("身份验证钥字节非法"))?;
         Ok(Self {
-            initiator_identity: IdentityPublicKey {
-                verifying,
-                dh: PublicKey::from(dh),
-            },
+            initiator_identity: IdentityPublicKey { verifying, dh: PublicKey::from(dh) },
             ephemeral: PublicKey::from(ephemeral),
             signed_pre_key_id,
             one_time_pre_key_id,
@@ -435,8 +431,8 @@ mod tests {
         let mallory = IdentityKeyPair::generate(&mut rng);
         let fake_spk = SignedPreKey::generate(&mallory, 1, &mut rng);
         let forged = PreKeyBundle {
-            identity: bob.identity.public(), // 冒充 Bob 的身份
-            signed_pre_key: fake_spk.bundle_part(),   // 但预密钥是 Mallory 的
+            identity: bob.identity.public(),        // 冒充 Bob 的身份
+            signed_pre_key: fake_spk.bundle_part(), // 但预密钥是 Mallory 的
             one_time_pre_key: Some((7, bob.opk.public)),
         };
 
@@ -462,7 +458,7 @@ mod tests {
         assert!(matches!(initiate(&alice, &bundle, &mut rng), Err(CryptoError::BadSignature)));
     }
 
-    /// key_id 错位：Alice 用了 Bob 已轮换丢弃的旧 SPK，Bob 必须拒绝
+    /// `key_id` 错位：Alice 用了 Bob 已轮换丢弃的旧 SPK，Bob 必须拒绝
     #[test]
     fn stale_pre_key_id_is_rejected() {
         let mut rng = OsRng;
@@ -512,5 +508,42 @@ mod tests {
         let (sk_a, initiation) = initiate(&alice, &bundle, &mut rng).unwrap();
         let sk_b = respond(&bob.identity, &bob.spk, None, &initiation).unwrap();
         assert_eq!(sk_a.expose(), sk_b.expose());
+    }
+
+    /// 全流程组合：X3DH 协商出的 SK 原样喂进双棘轮，两侧镜像解密。
+    ///
+    /// 这是 x3dh 与 ratchet 两个子模块的集成点：单测各自绿不够，
+    /// 接线（SK 交接 + SPK 公钥/私钥分给两侧）也得证明能对上。
+    #[test]
+    fn full_flow_x3dh_then_double_ratchet() {
+        use crate::e2ee::ratchet::RatchetState;
+
+        let mut rng = OsRng;
+        let alice_id = IdentityKeyPair::generate(&mut rng);
+        let bob = BobShelf::new();
+
+        // ① X3DH：两侧算出同一 SK
+        let (sk_a, initiation) = initiate(&alice_id, &bob.bundle(), &mut rng).unwrap();
+        let sk_b = respond(&bob.identity, &bob.spk, Some(&bob.opk), &initiation).unwrap();
+        assert_eq!(sk_a.expose(), sk_b.expose());
+
+        // ② 接线进双棘轮：Alice 拿 SPK 公钥当初始远端，
+        //    Bob 拿自己的 SPK 私钥当初始己方密钥对
+        //    （同模块测试可访问私钥字段，生产代码走公开 API 组装）
+        let mut alice_ratchet = RatchetState::init_initiator(sk_a.expose(), bob.spk.public);
+        let mut bob_ratchet = RatchetState::init_responder(sk_b.expose(), bob.spk.secret.clone());
+
+        // ③ 双向往返：首条消息后每轮往返都推 DH 棘轮，密文互解
+        //    （中文明文用 as_bytes()：b"" 字节串字面量只收 ASCII）
+        let m1 = alice_ratchet
+            .encrypt("你好 Bob，从现在起每条消息都在换锁".as_bytes(), &mut rng)
+            .unwrap();
+        assert_eq!(
+            bob_ratchet.decrypt(&m1).unwrap(),
+            "你好 Bob，从现在起每条消息都在换锁".as_bytes()
+        );
+
+        let m2 = bob_ratchet.encrypt("收到 Alice，锁换了我也跟得上".as_bytes(), &mut rng).unwrap();
+        assert_eq!(alice_ratchet.decrypt(&m2).unwrap(), "收到 Alice，锁换了我也跟得上".as_bytes());
     }
 }
