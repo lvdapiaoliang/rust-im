@@ -13,6 +13,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/im-transport/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/im-transport/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/xtask/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/im-sdk/examples" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
