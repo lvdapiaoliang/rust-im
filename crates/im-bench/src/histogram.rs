@@ -185,8 +185,11 @@ fn bucket_value(bucket: usize, slot: usize) -> u64 {
 /// 测试用伪随机源（确定性 LCG）：单测的基准真值需要可复现样本。
 /// 弱网链路的正式随机源是 weaklink 模块的 xorshift64*——两者刻意分开：
 /// 测试 rng 只求"稳定"，正式 rng 要"分布均匀且便宜"。
+/// 仅测试构造——非测试构建下不存在（测量代码不留死工具）。
+#[cfg(test)]
 pub(crate) struct TestRng(u64);
 
+#[cfg(test)]
 impl TestRng {
     /// 以种子构造（先扰动一步，避免"种子即首个输出"的巧合样本）。
     pub(crate) fn new(seed: u64) -> Self {
@@ -301,7 +304,7 @@ mod tests {
         let p90 = h.percentile_ns(90);
         let p99 = h.percentile_ns(99);
         let mx = h.max().expect("有样本").as_nanos();
-        assert!(p50 <= p90 && p90 <= p99 && p99 <= mx);
+        assert!(p50 <= p90 && p90 <= p99 && u128::from(p99) <= mx);
     }
 
     /// 平均值：已知样本的算术平均精确可验；空表返回 None。

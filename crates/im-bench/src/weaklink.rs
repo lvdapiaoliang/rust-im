@@ -28,7 +28,7 @@
 //!
 //! 学习文档：`docs/16-perf.md`（到达率与延迟分布的实测数据归档在那里）。
 
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -119,13 +119,14 @@ impl LinkStats {
     }
 }
 
-/// 双向统计的持有者（代理返回给场景读数）。
+/// 双向统计的持有者（代理返回给场景读数；每方向是独立 `Arc`——
+/// 泵 task 的生命周期与代理同长，场景随时读另一半）。
 #[derive(Debug, Default)]
 pub struct ProxyStats {
     /// 上行（客户端 → 服务端）。
-    up: LinkStats,
+    up: Arc<LinkStats>,
     /// 下行（服务端 → 客户端）。
-    down: LinkStats,
+    down: Arc<LinkStats>,
 }
 
 /// 一个弱网代理：监听本地端口，把流量注入损伤后转发给上游。
@@ -136,12 +137,13 @@ pub struct Proxy {
     pub stats: Arc<ProxyStats>,
 }
 
-/// 启动代理（返回即开始监听；task 的生命周期跟随进程）。
+/// 启动代理（返回即开始监听；task 的生命周期跟随进程）。仅在模块内使用——
+/// LinkCfg/Proxy 的可见性不需要越过模块边界。
 ///
 /// # Errors
 ///
 /// 端口绑定失败时返回 IO 错误。
-pub async fn spawn_proxy(
+async fn spawn_proxy(
     upstream: SocketAddr,
     up_cfg: LinkCfg,
     down_cfg: LinkCfg,
@@ -182,15 +184,17 @@ async fn accept_loop(
             Connection::with_max_frame_len(client, DEFAULT_MAX_FRAME_LEN).into_split();
         let (server_read, server_write) =
             Connection::with_max_frame_len(server, DEFAULT_MAX_FRAME_LEN).into_split();
-        spawn_pump(client_read, server_write, up, &stats.up);
-        spawn_pump(server_read, client_write, down, &stats.down);
+        spawn_pump(client_read, server_write, up, Arc::clone(&stats.up));
+        spawn_pump(server_read, client_write, down, Arc::clone(&stats.down));
     }
 }
 
 /// 架起一个方向：读侧 task（注入丢包/算到达时刻）+ 调度侧 task（按时出队写出）。
-fn spawn_pump(reader: ReadHalf, writer: WriteHalf, cfg: LinkCfg, stats: &LinkStats) {
+///
+/// `stats` 按方向独立 `Arc` 计数——两个泵 task 各持一半，代理不参与对账。
+fn spawn_pump(reader: ReadHalf, writer: WriteHalf, cfg: LinkCfg, stats: Arc<LinkStats>) {
     let (tx, rx) = mpsc::channel::<(Frame, tokio::time::Instant)>(256);
-    tokio::spawn(pump_in(reader, tx, cfg, stats));
+    tokio::spawn(pump_in(reader, tx, cfg, Arc::clone(&stats)));
     tokio::spawn(pump_out(rx, writer, stats));
 }
 
@@ -204,7 +208,7 @@ async fn pump_in(
     mut reader: ReadHalf,
     tx: mpsc::Sender<(Frame, tokio::time::Instant)>,
     cfg: LinkCfg,
-    stats: &LinkStats,
+    stats: Arc<LinkStats>,
 ) {
     let mut rng = XorShift::new(cfg.seed);
     loop {
@@ -249,13 +253,13 @@ impl PartialEq for HeapItem {
 impl Eq for HeapItem {}
 
 impl PartialOrd for HeapItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for HeapItem {
-    fn cmp(&self, other: &Self) -> Ordering {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         (self.0, self.1).cmp(&(other.0, other.1))
     }
 }
@@ -268,7 +272,7 @@ impl Ord for HeapItem {
 async fn pump_out(
     mut rx: mpsc::Receiver<(Frame, tokio::time::Instant)>,
     mut writer: WriteHalf,
-    stats: &LinkStats,
+    stats: Arc<LinkStats>,
 ) {
     let mut heap: BinaryHeap<Reverse<HeapItem>> = BinaryHeap::new();
     let mut seq: u64 = 0;
@@ -630,11 +634,13 @@ fn report(args: &WeakLinkArgs, o: &ReliabilityOutcome) {
     );
     if o.latency.count() > 0 {
         println!(
-            "端到端延迟      : P50 {}   P90 {}   P99 {}   max {}",
+            "端到端延迟      : min {}   P50 {}   P90 {}   P99 {}   max {}   mean {}",
+            fmt_dur(o.latency.min().expect("count>0 时必有 min")),
             fmt_dur(o.latency.percentile(50)),
             fmt_dur(o.latency.percentile(90)),
             fmt_dur(o.latency.percentile(99)),
             fmt_dur(o.latency.max().expect("count>0 时必有 max")),
+            fmt_dur(o.latency.mean().expect("count>0 时必有 mean")),
         );
     }
     // 整数算放大倍数（测量代码不掺浮点，与吞吐口径同款纪律）：

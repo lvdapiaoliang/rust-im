@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::Args;
-use im_protocol::{Cmd, Handshake, HandshakeAck, Payload};
+use im_protocol::{Handshake, HandshakeAck, Payload};
 use im_server::{SessionConfig, StaticToken};
 use im_transport::Connection;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -67,7 +67,7 @@ pub struct ConnStormArgs {
 fn connect_bound(local: IpAddr, server: SocketAddr) -> io::Result<TcpStream> {
     let domain = if server.is_ipv4() { Domain::IPV4 } else { Domain::IPV6 };
     let sock = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
-    sock.set_nodelay(true)?; // 建连/握手延迟是本场景的测量对象
+    sock.set_tcp_nodelay(true)?; // 建连/握手延迟是本场景的测量对象
     sock.bind(&SockAddr::from(SocketAddr::new(local, 0)))?;
     sock.connect(&SockAddr::from(server))?;
     sock.set_nonblocking(true)?;
@@ -99,14 +99,14 @@ async fn handshake(conn: &mut Connection, user_id: u64, token: &str, wait: Durat
 ///
 /// # Errors
 ///
-<arg_value>服务起不来、或浪潮结束后的守恒校验（在线数 == 成功数）不过时报错退出
+/// 服务起不来、或浪潮结束后的守恒校验（在线数 == 成功数）不过时报错退出
 /// ——压测结果建立在计数对得上才有意义（docs/20 §4.3）。
 pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
     anyhow::ensure!(args.connections >= 1, "--connections 至少为 1");
     anyhow::ensure!(args.wave >= 1, "--wave 至少为 1");
     anyhow::ensure!(args.source_ips >= 1, "--source-ips 至少为 1");
     let hold_secs = args.hold_secs.min(45); // 服务端 60s 读空闲纪律
-    let need_ips = (args.connections / 16_000) + 1;
+    let need_ips = u32::try_from(args.connections / 16_000 + 1).expect("连接数装得下 u32");
     if args.source_ips < need_ips {
         println!(
             "提示: {need_ips} 个源 IP 才能避开临时端口耗尽（当前 {}）——不足时连接失败会计入报告",
@@ -208,7 +208,7 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
         if t0.elapsed() > Duration::from_secs(30) {
             break false;
         }
-        tokio::time::yield_now().await;
+        tokio::task::yield_now().await;
     };
 
     report(args, total_before, connect_ns, handshake_ns, failures, baseline, &hold_samples, t_storm.elapsed(), teardown, cleared)?;
@@ -242,8 +242,8 @@ fn report(
     );
     println!("建立            : {established} 连接，风暴墙钟 {}", fmt_secs(storm_wall));
     if established > 0 {
-        let cps = u128::from(established) * 1_000_000_000 / connect_ns.max(1);
-        let hps = u128::from(established) * 1_000_000_000 / handshake_ns.max(1);
+        let cps = u128::try_from(established).expect("连接数装得下 u128") * 1_000_000_000 / connect_ns.max(1);
+        let hps = u128::try_from(established).expect("连接数装得下 u128") * 1_000_000_000 / handshake_ns.max(1);
         println!("建连相          : {}（{} 连接/秒）", fmt_ns(connect_ns), thousands(cps));
         println!("握手相          : {}（{} 连接/秒）", fmt_ns(handshake_ns), thousands(hps));
     }
@@ -326,7 +326,7 @@ fn fmt_kib(bytes: u64) -> String {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use im_protocol::{Msg, MsgAck};
+    use im_protocol::{Cmd, Msg, MsgAck};
     use im_server::AllowAll;
     use tokio::time::timeout;
 
