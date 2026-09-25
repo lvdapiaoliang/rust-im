@@ -143,7 +143,7 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
 
     // ── 风暴：波次进行，建连相与握手相分开计时 ──
     let t_storm = Instant::now();
-    let (held, connect_ns, handshake_ns, failures) = run_storm(args, addr).await;
+    let (mut held, connect_ns, handshake_ns, failures) = run_storm(args, addr).await;
 
     // ── 守恒校验：在线数必须等于保活袋大小 ──
     let online = sessions.online_count();
