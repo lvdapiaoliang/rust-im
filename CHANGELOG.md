@@ -89,5 +89,6 @@ workspace 管理（根 `Cargo.toml` 的 `[workspace.package]`，一处 bump 全 
   + ubuntu-only 真库 job（docs/20 §6.7）；拆后 CI 已线上全绿（fmt/clippy/三平台矩阵/postgres）
 - 修复（Actions 实机验证抓出）：pages.yml 引用不存在的 `peaceiris/action-mdbook`（少个 s，
   报 repository not found），已改 `peaceiris/actions-mdbook`（docs/20 §6.7）
-- 修复（Actions 实机验证抓出）：仓库 Pages 未开启时 configure-pages 报 Get Pages site failed，
-  已加 `enablement: true` 凭 pages:write 权限自动开启（docs/20 §6.7）
+- 诚实边界（Actions 实机验证抓出）：仓库 Pages 未开启时 configure-pages 报 Get Pages site failed；
+  enablement:true 又报 Resource not accessible by integration——首开 Pages 需 admin 权限，
+  GITHUB_TOKEN 代不了劳，需仓库管理员手动进 Settings → Pages → Source 选 GitHub Actions 开一次（docs/20 §6.7）
