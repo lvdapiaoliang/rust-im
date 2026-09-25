@@ -640,6 +640,15 @@ CI 配置的「本地全绿」只证明 YAML 合法 + 命令能跑，**证明不
 平台能力**——这正是 §6.4「诚实记录未实机验证」纪律要防的盲区，push 后
 WebFetch Actions 页面才抓出来。
 
+**同批 push 抓出的第二个缺陷**（同一条元教训）：pages.yml 引用了
+不存在的 action `peaceiris/action-mdbook`（少一个 s），build job 2s 就报
+`Unable to resolve action ... repository not found`——正确名是
+`peaceiris/actions-mdbook`。本地 `mdbook build` 全绿只证明 mdBook 本身
+能跑，**证明不了 workflow 里引用的第三方 action 名字对**。两个 bug
+归一条元教训：CI 配置的每个外部引用（runner 能力、action 名、image
+tag）都属实机验证边界，push 后必须回看 Actions 页面，别拿「本地
+全绿」当「线上能跑」。
+
 ---
 
 ## 七、Rust 业务开发常见错误速查表
