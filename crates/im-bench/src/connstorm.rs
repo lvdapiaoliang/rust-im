@@ -20,7 +20,10 @@
 //!   压测连接由 20s 一次的 Ping 扫掠保活（10 万目标的建连相本身就
 //!   超过 60s，“客户端不发心跳”的旧假设只在 1 万规模成立），
 //!   `--hold-secs` 上限仍 45s（扫掠不豁免拆除验证的纪律）；
-//! - Windows/Linux 的临时端口池约 1.6 万：单源 IP 连不满 10 万，
+//! - 端口口径（本机实测，Windows 与 Linux 不同）：Windows 的动态端口池
+//!   是**全局共享**的（不按源地址分区）——10 万连接三次停在 ~55,490
+//!   （os error 10055，≈池容量 55,536）；所以压测客户端**显式 bind 源
+//!   端口**（20000..=65535，每源 IP 独享 45,536 个，bind 不受动态池约束），
 //!   `--source-ips` 在 127/8 回环段轮换源地址（127.x.x.x 整段都是回环）。
 //!
 //! 学习文档：`docs/16-perf.md`（实测数据与三级里程碑的账本都在那里）。
@@ -55,7 +58,7 @@ pub struct ConnStormArgs {
     /// 每波并行连接数（风暴节奏：一波建完再下一波）
     #[arg(long, default_value_t = 250)]
     pub wave: usize,
-    /// 源 IP 轮换数（127.0.0.1..=127.0.0.N；单 IP 约 1.6 万临时端口）
+    /// 源 IP 轮换数（127.0.0.1..=127.0.0.N；每 IP 显式绑定 45,536 个源端口）
     #[arg(long, default_value_t = 1)]
     pub source_ips: u32,
     /// 稳态保持秒数（服务端 60s 读空闲断连，上限 45）
@@ -66,15 +69,17 @@ pub struct ConnStormArgs {
     pub handshake_timeout_ms: u64,
 }
 
-/// 绑定源 IP 的阻塞连接（socket2：std/tokio 都没有"先 bind 后 connect"）。
+/// 绑定本地地址的阻塞连接（socket2：std/tokio 都没有"先 bind 后 connect"）。
 ///
+/// `local` 的端口为 0 时由系统自动分配（受动态端口池约束）；压测风暴用
+/// [`source_addr`] 显式指定端口绕开 Windows 的全局端口池（见其文档）。
 /// 阻塞 connect 只发生在 `spawn_blocking` 池里（回环连接 ~50µs 完成，
 /// 不拖累异步运行时）；连接完成后转非阻塞交给 tokio。
-fn connect_bound(local: IpAddr, server: SocketAddr) -> io::Result<TcpStream> {
+fn connect_bound(local: SocketAddr, server: SocketAddr) -> io::Result<TcpStream> {
     let domain = if server.is_ipv4() { Domain::IPV4 } else { Domain::IPV6 };
     let sock = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
     sock.set_tcp_nodelay(true)?; // 建连/握手延迟是本场景的测量对象
-    sock.bind(&SockAddr::from(SocketAddr::new(local, 0)))?;
+    sock.bind(&SockAddr::from(local))?;
     sock.connect(&SockAddr::from(server))?;
     sock.set_nonblocking(true)?;
     TcpStream::from_std(sock.into())
@@ -118,10 +123,10 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
     anyhow::ensure!(args.source_ips >= 1, "--source-ips 至少为 1");
     anyhow::ensure!(args.source_ips <= 254, "--source-ips 最多 254（127.0.0.x 的 x 段上限）");
     let hold_secs = args.hold_secs.min(45); // 服务端 60s 读空闲纪律
-    let need_ips = u32::try_from(args.connections / 16_000 + 1).expect("连接数装得下 u32");
+    let need_ips = u32::try_from(args.connections / 45_536 + 1).expect("连接数装得下 u32");
     if args.source_ips < need_ips {
         println!(
-            "提示: {need_ips} 个源 IP 才能避开临时端口耗尽（当前 {}）——不足时连接失败会计入报告",
+            "提示: {need_ips} 个源 IP 才够显式端口容量（每 IP 45,536 个；当前 {}）——不足时连接失败会计入报告",
             args.source_ips
         );
     }
@@ -217,7 +222,7 @@ async fn run_storm(
         let t0 = Instant::now();
         let mut connects = JoinSet::new();
         for &idx in chunk {
-            let local = source_ip(idx, args.source_ips);
+            let local = source_addr(idx, args.source_ips);
             let server = addr;
             connects.spawn_blocking(move || connect_bound(local, server));
         }
@@ -345,6 +350,23 @@ fn source_ip(idx: usize, ips: u32) -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(127, 0, 0, u8::try_from(last).expect("末段 ≤ 254（入口已校验）")))
 }
 
+/// 第 `idx` 条连接的本地地址：源 IP 轮换 + **显式源端口**。
+///
+/// Windows 的动态端口池是**全局共享**的（不按源地址分区，与 Linux
+/// 相反）——源 IP 轮换换不来新端口，10 万目标三次停在 ~55,490
+/// （≈池容量 55,536，os error 10055；判别实验与口径见 docs/16）。
+/// 显式 `bind` 源端口不受动态池约束（池只管自动分配）：每个源 IP
+/// 独享 20000..=65535 共 45,536 个。
+fn source_addr(idx: usize, ips: u32) -> SocketAddr {
+    let ip = source_ip(idx, ips);
+    // 组内序号（同 IP 的第几条）决定端口；总容量 ips × 45,536，
+    // 组内回绕前必然已撞入口的容量提示
+    let per_ip = usize::try_from(ips).expect("入口已校验 ≥ 1");
+    let nth = u32::try_from(idx / per_ip).expect("连接数装得下 u32");
+    let port = 20_000 + nth % 45_536;
+    SocketAddr::new(ip, u16::try_from(port).expect("20,000 + 余数 ≤ 65,535"))
+}
+
 /// 纳秒 → 人读时长（µs/ms/s 三段）。
 fn fmt_ns(ns: u128) -> String {
     if ns < 1_000 {
@@ -403,6 +425,20 @@ mod tests {
         assert_eq!(source_ip(6, 3), IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
+    /// 显式源端口：同 IP 内端口互不重复、从 20000 起推进；跨 IP 可复用
+    /// （四元组不同）；组内序号回绕不 panic。
+    #[test]
+    fn source_addr_assigns_explicit_ports() {
+        let v4 = |a, b, c, d| IpAddr::V4(Ipv4Addr::new(a, b, c, d));
+        assert_eq!(source_addr(0, 3), SocketAddr::new(v4(127, 0, 0, 1), 20_000));
+        assert_eq!(source_addr(1, 3), SocketAddr::new(v4(127, 0, 0, 2), 20_000));
+        assert_eq!(source_addr(2, 3), SocketAddr::new(v4(127, 0, 0, 3), 20_000));
+        // 同 IP（idx 0 与 3 都是 .1）的端口必须推进：20,000 → 20,001
+        assert_eq!(source_addr(3, 3), SocketAddr::new(v4(127, 0, 0, 1), 20_001));
+        // 组内序号回绕（3 × 45,536 条之后）——仅验证不 panic
+        let _ = source_addr(136_608, 3);
+    }
+
     /// 绑定源 IP 的连接：走完整服务端握手 + 一条消息往返。
     /// （127.0.0.2 是回环——Windows/Linux 对 127/8 全段默认如此。）
     #[tokio::test]
@@ -413,7 +449,9 @@ mod tests {
         })
         .await
         .expect("服务应能启动");
-        let stream = connect_bound(IpAddr::V4(Ipv4Addr::LOCALHOST), addr).expect("绑定回环连接");
+        let stream =
+            connect_bound(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), addr)
+                .expect("绑定回环连接");
         let mut conn = Connection::new(stream);
         handshake(&mut conn, 7, "any", Duration::from_secs(2))
             .await
@@ -444,7 +482,9 @@ mod tests {
         })
         .await
         .expect("服务应能启动");
-        let stream = connect_bound(IpAddr::V4(Ipv4Addr::LOCALHOST), addr).expect("连接应成功");
+        let stream =
+            connect_bound(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), addr)
+                .expect("连接应成功");
         let mut conn = Connection::new(stream);
         let err = handshake(&mut conn, 7, "wrong", Duration::from_secs(2))
             .await
