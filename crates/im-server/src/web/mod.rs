@@ -15,6 +15,8 @@
 //! - [`db`]：连接池与迁移——唯一的 sqlx 连接入口；
 //! - [`account`] / [`friends`] / [`groups`] / [`files`]：各域仓储——
 //!   业务语义（状态机、事务、安全取舍）收敛在这里；
+//! - [`meeting`]：会议令牌签发（阶段 9）——纯计算无仓储（JWT 手签），
+//!   授权裁决（is_member）在 api 层；
 //! - [`api`]：REST 路由与处理器——只做解析/组装/错误映射，不写 SQL；
 //! - [`ws`]：WS 网关——JSON 信封 ↔ `Frame` 翻译层 + 会话核心对接
 //!   （鉴权在 HTTP 升级前，握手/消息/同步复用会话层状态机）。
@@ -30,6 +32,7 @@ pub mod fanout;
 pub mod files;
 pub mod friends;
 pub mod groups;
+pub mod meeting;
 pub mod ws;
 
 /// `u64` 雪花 ID → `i64`（PG `BIGINT`）：发号器保证 < 2^63。

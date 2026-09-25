@@ -31,6 +31,7 @@ use super::fanout::GroupHub;
 use super::files::{FileError, FileMeta, FileStore, MAX_FILE_SIZE};
 use super::friends::{FriendError, FriendStore};
 use super::groups::{GroupError, GroupStore};
+use super::meeting::LiveKitConfig;
 
 /// 登录令牌有效期：7 天（演示值；阶段 10 工程化时做滑动续期）。
 pub const TOKEN_TTL: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
@@ -51,6 +52,8 @@ pub struct AppState {
     pub hub: GroupHub,
     /// 文件域仓储。
     pub files: FileStore,
+    /// 会议（阶段 9）：LiveKit 连接配置（令牌签发见 meeting 模块）。
+    pub livekit: LiveKitConfig,
 }
 
 impl AppState {
@@ -78,6 +81,7 @@ impl AppState {
             groups,
             hub,
             files: FileStore::new(pool, files_root).await?,
+            livekit: LiveKitConfig::from_env(),
         })
     }
 }
@@ -279,6 +283,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/users", get(find_user))
         .route("/api/groups", post(create_group).get(my_groups))
         .route("/api/groups/{id}/members", post(add_group_member).get(list_group_members))
+        .route("/api/groups/{id}/meeting/token", post(meeting_token))
         .route("/api/files", post(upload_file))
         .route("/api/files/{id}", get(download_file))
         .route("/ws", get(super::ws::ws_handler))
@@ -514,6 +519,46 @@ async fn list_group_members(
     }
     let members = state.groups.list_member_users(group_id).await?;
     Ok(Json(members))
+}
+
+// ────────────────────────────────────────────────────────────────
+// 会议（阶段 9）
+// ────────────────────────────────────────────────────────────────
+
+/// POST /api/groups/{id}/meeting/token：领取入会令牌（限群成员）。
+///
+/// 会议没有独立的发起/结束状态机——一群一间常驻会议室（room 名由
+/// 群 ID 派生），谁先带 token 进去谁就「开始」了会议；最后一人离开
+/// 后 LiveKit 自动回收房间。我们只裁决「**谁有资格领票**」（is_member
+/// 点查——与消息门槛、成员列表同一纪律），之后的发布/订阅控制交给
+/// 令牌里的 grants。
+async fn meeting_token(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(group_id): Path<u64>,
+) -> Result<Json<MeetingTokenResp>, ApiError> {
+    if !state.groups.is_member(group_id, auth.user.id).await? {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "只有群成员可以加入会议"));
+    }
+    let room = super::meeting::room_name(group_id);
+    let token = super::meeting::sign_meeting_token(
+        &state.livekit,
+        auth.user.id,
+        &auth.user.display_name,
+        &room,
+    );
+    Ok(Json(MeetingTokenResp { token, url: state.livekit.url.clone(), room }))
+}
+
+/// 入会令牌响应：token + 连接地址 + 房间名（前端无脑直连，配置只在服务端）。
+#[derive(Debug, serde::Serialize)]
+pub struct MeetingTokenResp {
+    /// LiveKit 入会 JWT（2 小时有效）。
+    pub token: String,
+    /// LiveKit 服务地址（`ws://` / `wss://`）。
+    pub url: String,
+    /// 房间名（群 ID 派生）。
+    pub room: String,
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -880,6 +925,98 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
         cleanup(&pool, &[&name_a, &name_b], &root).await;
+    }
+
+    /// 会议令牌（阶段 9）：成员领票 200（三段 JWT + 群派生房间名）；
+    /// 非成员 403；拉人入群后新成员也能领票——**资格跟着成员表走**。
+    #[tokio::test]
+    async fn meeting_token_membership_gate() {
+        let Some((app, pool, root)) = app_or_skip().await else {
+            eprintln!("skip: PostgreSQL 不可达");
+            return;
+        };
+        let name_a = unique_username();
+        let name_b = unique_username();
+        let name_c = unique_username();
+        let (token_a, user_a) = register_and_login(&app, &name_a, "pass1234").await;
+        let (token_b, user_b) = register_and_login(&app, &name_b, "pass1234").await;
+        let (token_c, _user_c) = register_and_login(&app, &name_c, "pass1234").await;
+        let _ = user_a;
+
+        let resp = app
+            .clone()
+            .oneshot(authed(
+                "POST",
+                "/api/groups",
+                &token_a,
+                Some(serde_json::json!({ "name": "会议室" })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let group = json_body(resp).await;
+        let group_id: u64 =
+            group["id"].as_str().expect("ID 应为字符串").parse().expect("应为合法 u64");
+
+        // 群主领票：JWT 三段 + 房间名由群 ID 派生
+        let resp = app
+            .clone()
+            .oneshot(authed(
+                "POST",
+                &format!("/api/groups/{group_id}/meeting/token"),
+                &token_a,
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ticket = json_body(resp).await;
+        assert_eq!(ticket["room"], serde_json::json!(format!("im-meeting-{group_id}")));
+        assert!(
+            ticket["url"]
+                .as_str()
+                .is_some_and(|u| u.starts_with("ws://") || u.starts_with("wss://"))
+        );
+        assert_eq!(ticket["token"].as_str().expect("token 应为字符串").split('.').count(), 3);
+
+        // 非成员领票被拒
+        let resp = app
+            .clone()
+            .oneshot(authed(
+                "POST",
+                &format!("/api/groups/{group_id}/meeting/token"),
+                &token_c,
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        // 拉人入群后新成员立即有资格（成员表是唯一真相源）
+        let resp = app
+            .clone()
+            .oneshot(authed(
+                "POST",
+                &format!("/api/groups/{group_id}/members"),
+                &token_a,
+                Some(serde_json::json!({ "user_id": user_b.id })),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app
+            .clone()
+            .oneshot(authed(
+                "POST",
+                &format!("/api/groups/{group_id}/meeting/token"),
+                &token_b,
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        cleanup(&pool, &[&name_a, &name_b, &name_c], &root).await;
     }
 
     /// 文件：multipart 上传 → 鉴权下载往返；缺令牌 401
