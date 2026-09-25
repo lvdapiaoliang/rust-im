@@ -25,7 +25,7 @@ pub const ERR_STOPPED: i32 = 2;
 pub const ERR_TIMEOUT: i32 = 3;
 /// 4：回调模式下调用 poll（事件归事件泵线程，调用方不该抢）。
 pub const ERR_POLL_WITH_CALLBACK: i32 = 4;
-/// 5：内部故障（兑底：理论上不可达，保留给防御性路径）。
+/// 5：内部故障（兜底：理论上不可达，保留给防御性路径）。
 pub const ERR_INTERNAL: i32 = 5;
 /// 6：握手被服务端拒绝（不再重连；归还的客户端只能 destroy）。
 ///
@@ -81,7 +81,7 @@ mod tests {
         }
     }
     
-    /// 未定义码（含负数）落到统一兑底，绝不 panic 越界。
+    /// 未定义码（含负数）落到统一兜底，绝不 panic 越界。
     #[test]
     fn unknown_codes_fall_back() {
         assert_eq!(error_string(ERR_HANDSHAKE_REJECTED), "handshake rejected by server");
