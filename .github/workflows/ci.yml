@@ -1,17 +1,20 @@
 # 阶段 14：持续集成矩阵。
 #
-# 三个 job 各司其职：
-#   fmt    —— 格式门槛（一台 Linux 足够，格式与平台无关）；
-#   clippy —— 静态检查门槛（pedantic 全开，本地开发口径与 CI 一致）；
-#   test   —— 三平台测试矩阵：
-#     * ubuntu：配 PostgreSQL service container，全量测试真跑
-#       （web 模块的 pool_or_skip 设计：本地无库空转保绿，CI 配真库
-#        补盲区——阶段 5 立的账在这里兑现，见 im-server db.rs）；
-#     * windows：验证 MSVC 工具链构建 + 测试（rustls 钉 ring 的
-#       「能被任何人一键构建」主张，Windows 是最容易断的那条腿）；
-#     * macos：验证 aarch64-apple 链。GitHub 的 service container
-#       仅支持 Linux runner，windows/macos 的数据库测试按
-#       pool_or_skip 设计空转（2s 连接超时后 skip，不误报）。
+# 四个 job 各司其职：
+#   fmt           —— 格式门槛（一台 Linux 足够，格式与平台无关）；
+#   clippy        —— 静态检查门槛（pedantic 全开，本地开发口径与 CI 一致）；
+#   test          —— 三平台构建/测试矩阵（不配数据库）：
+#     * 验证 ubuntu / windows(MSVC) / macos(aarch64-apple) 三条工具链
+#       都能一键构建并通过全量测试——rustls 钉 ring 的「能被任何人
+#       一键构建」主张，Windows 是最容易断的那条腿；
+#     * 三条腿都不配数据库，web 模块的 DB 测试按 pool_or_skip 设计
+#       空转跳过（2s 连接超时后 skip，不误报，见 im-server db.rs）。
+#   test-postgres —— ubuntu 专跑数据库测试：
+#     * GitHub 的 service container 仅支持 Linux runner，真库只能挂在
+#       ubuntu job 上——早期把 services 放进三平台矩阵会让 windows/macos
+#       两条腿直接失败（非 Linux runner 不支持容器操作），故拆分；
+#     * 这里配 PostgreSQL service + DATABASE_URL，pool_or_skip 拿到真池，
+#       兑现阶段 5 立的账：本地无库空转保绿，CI 配真库补盲区。
 name: CI
 
 on:
@@ -46,6 +49,7 @@ jobs:
       # all + pedantic，见根 Cargo.toml）
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  # 三平台构建/测试矩阵：不配数据库，只验证各平台工具链能一键构建通过
   test:
     name: Test (${{ matrix.os }})
     strategy:
@@ -53,6 +57,22 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # 不设 DATABASE_URL：web 模块的 DB 测试走 pool_or_skip 空转跳过
+      - run: cargo test --workspace
+      # 示例也是交付物的一部分：tls_demo / quic_demo 全链路自检
+      #（内部自带断言，跑通即通过；Windows/macOS 一并验证平台兼容）
+      - run: cargo run -p im-server --example tls_demo
+      - run: cargo run -p im-server --example quic_demo
+
+  # ubuntu 专跑数据库测试：service container 仅支持 Linux runner，真库只能
+  # 挂在这里（不能进上面三平台矩阵，否则 windows/macos 两条腿会直接失败）
+  test-postgres:
+    name: Test (postgres @ ubuntu)
+    runs-on: ubuntu-latest
     # PostgreSQL service：容器侧口令/库名与 db.rs 的约定对齐
     #（DATABASE_URL 覆盖机制是阶段 5 预留的 CI 入口）
     services:
@@ -70,15 +90,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # 非 Linux runner 没有 service container，这条连接串必然连不上——
-      # pool_or_skip 会空转跳过数据库测试（设计如此，见 db.rs）
+      # 有真库：pool_or_skip 拿到连接池，web 模块的 DB 测试在这里真跑
       DATABASE_URL: postgres://im:im123456@127.0.0.1:5432/im?sslmode=disable
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
-      # 示例也是交付物的一部分：tls_demo / quic_demo 全链路自检
-      #（内部自带断言，跑通即通过；Windows/macOS 一并验证平台兼容）
-      - run: cargo run -p im-server --example tls_demo
-      - run: cargo run -p im-server --example quic_demo
