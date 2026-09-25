@@ -76,15 +76,17 @@ pub async fn migrate(pool: &PgPool) -> Result<(), DbError> {
     Ok(())
 }
 
-/// 测试脚手架：web 模块共用的「迁移到位的池」。
+/// 测试脚手架：web 模块共用的「迁移到位的池」与「唯一 machine_id 的会话中心」。
 #[cfg(test)]
 pub(crate) mod testing {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
     use sqlx::PgPool;
     use sqlx::postgres::PgPoolOptions;
 
     use super::database_url;
+    use crate::session::{SessionConfig, Sessions};
 
     /// 拿到迁移到位的池；PG 不可达时返回 `None`。
     ///
@@ -99,6 +101,24 @@ pub(crate) mod testing {
             .ok()?;
         super::migrate(&pool).await.ok()?;
         Some(pool)
+    }
+
+    /// 进程级 machine_id 分配计数器（见 [`test_sessions`]）。
+    static MACHINE_ID_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    /// 建一个带**唯一 machine_id** 的会话中心（测试并行安全）。
+    ///
+    /// 雪花的唯一性契约是「一个 machine_id 只属于一个发号器」（见
+    /// `snowflake::concurrent_generators_produce_unique_ids`）。集成测试
+    /// 在同一进程里**并行**起多个 `Sessions`，若都吃默认 machine_id，
+    /// 两个测试在同一毫秒各发首号（sequence 都从 0 起）会算出同一个
+    /// ID，撞库唯一约束（`friend_requests_pkey` 等）——表现为偶发
+    /// 失败、单跑必过。这里用进程级原子计数器给每个测试实例发不同
+    /// machine_id（10 位共 1024 槽，远超测试数量），从根上消除碰撞。
+    pub(crate) fn test_sessions() -> Sessions {
+        let machine_id =
+            MACHINE_ID_SEQ.fetch_add(1, Ordering::Relaxed) % (crate::snowflake::MAX_MACHINE_ID + 1);
+        Sessions::new(SessionConfig { machine_id, ..SessionConfig::default() })
     }
 }
 

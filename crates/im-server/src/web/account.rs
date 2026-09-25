@@ -282,12 +282,11 @@ fn verify_password(password: &str, phc: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::SessionConfig;
-    use crate::web::db::testing::pool_or_skip;
+    use crate::web::db::testing::{pool_or_skip, test_sessions};
 
-    /// 雪花发号器（测试专用实例，机器 ID 默认）。
+    /// 雪花发号器（测试专用实例，每次分配唯一 machine_id——并行测试不撞库）。
     fn ids() -> Sessions {
-        Sessions::new(SessionConfig::default())
+        test_sessions()
     }
 
     /// 每个测试一个全局唯一的用户名（共享开发库下互不干扰）。
