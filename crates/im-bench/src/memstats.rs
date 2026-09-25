@@ -115,7 +115,7 @@ mod windows {
     /// Win32 `HANDLE`（伪句柄场景用裸整数，不构造包装类型）。
     type HANDLE = isize;
 
-    extern "system" {
+    unsafe extern "system" {
         /// 当前进程伪句柄（常量，无需关闭）。
         fn GetCurrentProcess() -> HANDLE;
         /// 读进程内存统计。
