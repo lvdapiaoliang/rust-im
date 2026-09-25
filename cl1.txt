@@ -1,0 +1,215 @@
+﻿cargo :     Checking im-protocol v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-protocol)
+所在位置 行:1 字符: 5
++ & { cargo clippy --workspace --all-targets 2>&1 | Out-File -Encoding  ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking im...es\im-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Checking im-crypto v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-crypto)
+    Checking xtask v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\xtask)
+warning: doc list item without indentation
+ --> crates\im-crypto\src\lib.rs:9:5
+  |
+9 | //!   瀵嗙爜瀛﹀師璇紙X25519/HKDF/AES-GCM/Ed25519锛夌敤瀹¤杩囩殑搴擄紝
+  |     ^^
+  |
+  = help: if this is supposed to be its own paragraph, add a blank line
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_continu
+ation
+  = note: `-W clippy::doc-lazy-continuation` implied by `-W clippy::all`
+  = help: to override `-W clippy::all` add `#[allow(clippy::doc_lazy_continuation)]`
+help: indent this line
+  |
+9 | //!     瀵嗙爜瀛﹀師璇紙X25519/HKDF/AES-GCM/Ed25519锛夌敤瀹¤杩囩殑搴擄紝
+  |       ++
+
+warning: doc list item without indentation
+  --> crates\im-crypto\src\lib.rs:10:5
+   |
+10 | //!   涓庨樁娈?9 鎵嬪啓 HMAC 鏄悓涓€鏉¤竟鐣岋細閫犺疆瀛愮殑浠峰€煎湪鍗忚灞傜悊瑙ｏ紝
+   |     ^^
+   |
+   = help: if this is supposed to be its own paragraph, add a blank line
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_contin
+uation
+help: indent this line
+   |
+10 | //!     涓庨樁娈?9 鎵嬪啓 HMAC 鏄悓涓€鏉¤竟鐣岋細閫犺疆瀛愮殑浠峰€煎湪鍗忚灞傜悊瑙ｏ紝
+   |       ++
+
+warning: doc list item without indentation
+  --> crates\im-crypto\src\lib.rs:11:5
+   |
+11 | //!   涓嶅湪閲嶅啓鍒嗙粍瀵嗙爜銆?   |     ^^
+   |
+   = help: if this is supposed to be its own paragraph, add a blank line
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_contin
+uation
+help: indent this line
+   |
+11 | //!     涓嶅湪閲嶅啓鍒嗙粍瀵嗙爜銆?   |       ++
+
+warning: item in documentation is missing backticks
+  --> crates\im-crypto\src\tls.rs:62:34
+   |
+62 |     /// `127.0.0.1`鈥斺€攔ustls 瀹㈡埛绔寜 ServerName 涓ユ牸鍖归厤 SAN锛?   |                                      ^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+   = note: `-W clippy::doc-markdown` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::doc_markdown)]`
+help: try
+   |
+62 -     /// `127.0.0.1`鈥斺€攔ustls 瀹㈡埛绔寜 ServerName 涓ユ牸鍖归厤 SAN锛?62 +     /// `127.0.0.1`鈥斺€攔ustls 瀹㈡埛绔寜 `ServerName` 涓
+ユ牸鍖归厤 SAN锛?   |
+
+    Checking im-storage v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-storage)
+warning: `im-crypto` (lib) generated 4 warnings (run `cargo clippy --fix --lib -p im-crypto -- ` to apply 1 suggestion)
+    Checking im-transport v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-transport)
+warning: `im-crypto` (lib test) generated 4 warnings (4 duplicates)
+warning: item in documentation is missing backticks
+  --> crates\im-transport\src\connection.rs:18:46
+   |
+18 | //! 锛坄Connection<tls::ServerTlsStream>`锛変笂銆傝繖鏄?GoF 瑁呴グ鍣ㄥ湪 Rust 鐨?   |                                             
+       ^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+   = note: `-W clippy::doc-markdown` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::doc_markdown)]`
+help: try
+   |
+18 - //! 锛坄Connection<tls::ServerTlsStream>`锛変笂銆傝繖鏄?GoF 瑁呴グ鍣ㄥ湪 Rust 鐨?18 + //! 锛坄Connection<tls::ServerTlsStream>`锛変笂銆傝
+繖鏄?`GoF` 瑁呴グ鍣ㄥ湪 Rust 鐨?   |
+
+warning: item in documentation is missing backticks
+  --> crates\im-transport\src\connection.rs:29:27
+   |
+29 | //! 鏀逛负 `tokio::io::split`锛圔iLock 鍗婇儴锛屼换浣曟祦閫氱敤锛夈€傚彇鑸嶏細BiLock 鍦?   |                              ^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+29 - //! 鏀逛负 `tokio::io::split`锛圔iLock 鍗婇儴锛屼换浣曟祦閫氱敤锛夈€傚彇鑸嶏細BiLock 鍦?29 + //! 鏀逛负 `tokio::io::split`锛坄BiLock` 鍗婇儴锛屼换浣曟祦閫
+氱敤锛夈€傚彇鑸嶏細BiLock 鍦?   |
+
+warning: item in documentation is missing backticks
+  --> crates\im-transport\src\connection.rs:32:33
+   |
+32 | //!锛?9,969 杩炴帴锛夊缓绔嬪湪 Owned 鍗婇儴涓婏紝鏈洜鎹?BiLock 閲嶆祴鈥斺€旀暟瀛楀彛寰?   |                                               ^^^^^
+^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+32 - //!锛?9,969 杩炴帴锛夊缓绔嬪湪 Owned 鍗婇儴涓婏紝鏈洜鎹?BiLock 閲嶆祴鈥斺€旀暟瀛楀彛寰?32 + //!锛?9,969 杩炴帴锛夊缓绔嬪湪 Owned 鍗婇儴涓婏紝鏈洜鎹?`BiLock` 閲嶆祴鈥
+斺€旀暟瀛楀彛寰?   |
+
+warning: item in documentation is missing backticks
+   --> crates\im-transport\src\connection.rs:137:30
+    |
+137 |     /// 鐢?`tokio::io::split`锛圔iLock 鍗婇儴锛夎€屼笉鏄?`TcpStream::into_split`
+    |                                ^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+137 -     /// 鐢?`tokio::io::split`锛圔iLock 鍗婇儴锛夎€屼笉鏄?`TcpStream::into_split`
+137 +     /// 鐢?`tokio::io::split`锛坄BiLock` 鍗婇儴锛夎€屼笉鏄?`TcpStream::into_split`
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\im-transport\src\connection.rs:194:14
+    |
+194 | /// peer 鍦板潃浠?TcpStream 鎷夸竴娆″甫杩涘幓鍗冲彲锛夈€?    |                 ^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+194 - /// peer 鍦板潃浠?TcpStream 鎷夸竴娆″甫杩涘幓鍗冲彲锛夈€?194 + /// peer 鍦板潃浠?`TcpStream` 鎷夸竴娆″甫杩涘幓鍗冲彲锛夈€?    |
+
+warning: item in documentation is missing backticks
+  --> crates\im-transport\src\tls.rs:21:21
+   |
+21 | //!锛堝绔嫆缁濄€佽瘉涔︽牎楠屼笉杩囥€佽瘉涔︿笌 ServerName 涓嶅尮閰嶇瓑锛夛紝
+   |                                     ^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+21 - //!锛堝绔嫆缁濄€佽瘉涔︽牎楠屼笉杩囥€佽瘉涔︿笌 ServerName 涓嶅尮閰嶇瓑锛夛紝
+21 + //!锛堝绔嫆缁濄€佽瘉涔︽牎楠屼笉杩囥€佽瘉涔︿笌 `ServerName` 涓嶅尮閰嶇瓑锛夛紝
+   |
+
+warning: `im-transport` (lib) generated 6 warnings (run `cargo clippy --fix --lib -p im-transport -- ` to apply 6 sugge
+stions)
+    Checking im-server v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-server)
+    Checking im-client v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-client)
+warning: item in documentation is missing backticks
+   --> crates\im-transport\src\tls.rs:198:14
+    |
+198 |     /// 锛堝悓涓€濂?read_frame/write_frame锛屽簳灞備粠 TCP 鎹㈡垚 TLS锛岄浂鏀瑰姩锛夈€?    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+198 -     /// 锛堝悓涓€濂?read_frame/write_frame锛屽簳灞備粠 TCP 鎹㈡垚 TLS锛岄浂鏀瑰姩锛夈€?198 +     /// 锛堝悓涓€濂?`read_frame/write_frame锛屽簳灞
+備粠` TCP 鎹㈡垚 TLS锛岄浂鏀瑰姩锛夈€?    |
+
+warning: item in documentation is missing backticks
+   --> crates\im-transport\src\tls.rs:241:33
+    |
+241 |     /// 甯у崗璁殑宸茬煡鏄庢枃澶达紱瀹炴祴蹇呬负 0x16锛圱LS ClientHello 璁板綍绫诲瀷锛夈€?    |                                               
+ ^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+    |
+241 -     /// 甯у崗璁殑宸茬煡鏄庢枃澶达紱瀹炴祴蹇呬负 0x16锛圱LS ClientHello 璁板綍绫诲瀷锛夈€?241 +     /// 甯у崗璁殑宸茬煡鏄庢枃澶达紱瀹炴祴蹇呬负 0x16锛圱LS `Client
+Hello` 璁板綍绫诲瀷锛夈€?    |
+
+warning: `im-transport` (lib test) generated 8 warnings (6 duplicates) (run `cargo clippy --fix --lib -p im-transport -
+-tests -- ` to apply 2 suggestions)
+    Checking im-sdk v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-sdk)
+    Checking im-bench v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-bench)
+warning: item in documentation is missing backticks
+  --> crates\im-server\examples\tls_demo.rs:18:14
+   |
+18 | //! 浠庤緭鍑鸿兘鐪嬪埌闆姳 session_id銆丄ck 涓庢秷鎭€愬瓧鏃犳崯銆?   |                      ^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+   = note: `-W clippy::doc-markdown` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::doc_markdown)]`
+help: try
+   |
+18 - //! 浠庤緭鍑鸿兘鐪嬪埌闆姳 session_id銆丄ck 涓庢秷鎭€愬瓧鏃犳崯銆?18 + //! 浠庤緭鍑鸿兘鐪嬪埌闆姳 `session_id銆丄ck` 涓庢秷鎭€愬瓧鏃犳崯銆?   |
+
+warning: item in documentation is missing backticks
+  --> crates\im-server\examples\tls_demo.rs:29:20
+   |
+29 | /// 婕旂ず绔彛鍥哄畾锛堜笌 sdk 鐨?demo_server 鍚岄鏍硷紝鏂逛究鎶撳寘瑙傚療锛夈€?   |                             ^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_markdown
+help: try
+   |
+29 - /// 婕旂ず绔彛鍥哄畾锛堜笌 sdk 鐨?demo_server 鍚岄鏍硷紝鏂逛究鎶撳寘瑙傚療锛夈€?29 + /// 婕旂ず绔彛鍥哄畾锛堜笌 sdk 鐨?`demo_server` 鍚岄鏍硷紝鏂逛究鎶撳寘瑙傚療锛夈€
+?   |
+
+warning: enclosing `Ok` and `?` operator are unneeded
+   --> crates\im-server\examples\tls_demo.rs:129:9
+    |
+129 |         Ok(self.recv().await?)
+    |         ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_quest
+ion_mark
+    = note: `-W clippy::needless-question-mark` implied by `-W clippy::all`
+    = help: to override `-W clippy::all` add `#[allow(clippy::needless_question_mark)]`
+help: remove the enclosing `Ok` and `?` operator
+    |
+129 -         Ok(self.recv().await?)
+129 +         self.recv().await
+    |
+
+warning: `im-server` (example "tls_demo") generated 3 warnings (run `cargo clippy --fix --example "tls_demo" -p im-serv
+er -- ` to apply 3 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.60s

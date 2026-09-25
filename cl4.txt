@@ -1,0 +1,13 @@
+﻿cargo :     Checking im-crypto v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-crypto)
+所在位置 行:1 字符: 5
++ & { cargo clippy --workspace --all-targets 2>&1 | Out-File -Encoding  ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking im...ates\im-crypto):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Checking im-transport v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-transport)
+    Checking im-server v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-server)
+    Checking im-client v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-client)
+    Checking im-sdk v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-sdk)
+    Checking im-bench v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-bench)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.89s

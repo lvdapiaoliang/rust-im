@@ -53,7 +53,7 @@ use im_transport::{
     DedupWindow, GatewayConfig, GatewayStream, InboundFrame, ShutdownRx, ShutdownTx,
     TransportError, Verdict, shutdown_channel, spawn_gateway,
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 

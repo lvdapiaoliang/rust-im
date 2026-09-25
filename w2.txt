@@ -1,0 +1,7 @@
+﻿
+crates\im-transport\src\lib.rs:11://! | 12 | rustls TLS（[`tls`]：材料在 im-crypto，装配在这里；网关泛型化支持任意 [`gateway::GatewayStream`
+]） | ✅ |
+crates\im-transport\src\lib.rs:64:    ConnectionHandle, DEFAULT_IDLE_TIMEOUT, GatewayConfig, GatewayStream, HeartbeatPo
+licy,
+
+

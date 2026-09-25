@@ -28,9 +28,9 @@
 
 use std::sync::Arc;
 
+use rustls::crypto::ring as ring_provider;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
-use rustls::crypto::ring as ring_provider;
 
 use crate::error::CryptoError;
 
@@ -59,7 +59,7 @@ impl TlsMaterial {
     /// 生成一套演示材料：自签 CA → 由 CA 签发的服务端叶子证书。
     ///
     /// SAN（Subject Alternative Name）同时含 DNS `localhost` 与 IP
-    /// `127.0.0.1`——rustls 客户端按 ServerName 严格匹配 SAN，
+    /// `127.0.0.1`——rustls 客户端按 `ServerName` 严格匹配 SAN，
     /// 两者都写，直连 IP 和写主机名的两种连法都能通过校验。
     ///
     /// # Errors
@@ -118,10 +118,7 @@ impl TlsMaterial {
         ServerConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
             .with_safe_default_protocol_versions()?
             .with_no_client_auth()
-            .with_single_cert(
-                vec![self.server_cert_der.clone()],
-                self.server_key_der.clone_key(),
-            )
+            .with_single_cert(vec![self.server_cert_der.clone()], self.server_key_der.clone_key())
             .map_err(CryptoError::Rustls)
     }
 

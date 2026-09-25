@@ -1,0 +1,14 @@
+﻿
+> crates\im-protocol\src\payload.rs:189:pub struct HandshakeAck {
+  crates\im-protocol\src\payload.rs:190:    /// 会话 ID；0 表示拒绝。
+  crates\im-protocol\src\payload.rs:191:    pub session_id: u64,
+  crates\im-protocol\src\payload.rs:192:    /// 拒绝原因（成功时为空串）。
+  crates\im-protocol\src\payload.rs:193:    pub reason: String,
+  crates\im-protocol\src\payload.rs:194:}
+  crates\im-protocol\src\payload.rs:195:
+  crates\im-protocol\src\payload.rs:196:impl HandshakeAck {
+  crates\im-protocol\src\payload.rs:197:    /// 构造「接受」应答。
+  crates\im-protocol\src\payload.rs:198:    #[must_use]
+  crates\im-protocol\src\payload.rs:199:    pub fn accepted(session_id: u64) -> Self {
+
+

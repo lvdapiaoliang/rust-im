@@ -186,7 +186,14 @@ async fn accept_loop(
 /// 架起一个方向：读侧 task（注入丢包/算到达时刻）+ 调度侧 task（按时出队写出）。
 ///
 /// `stats` 按方向独立 `Arc` 计数——两个泵 task 各持一半，代理不参与对账。
-fn spawn_pump(reader: ReadHalf, writer: WriteHalf, cfg: LinkCfg, stats: Arc<LinkStats>) {
+///
+/// 半部类型泛型化（阶段 12 连接层泛型的下游跟进）：代理仍只跑
+/// `TcpStream`，但签名不再钉死具体类型。
+fn spawn_pump<R, W>(reader: ReadHalf<R>, writer: WriteHalf<W>, cfg: LinkCfg, stats: Arc<LinkStats>)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let (tx, rx) = mpsc::channel::<(Frame, tokio::time::Instant)>(256);
     tokio::spawn(pump_in(reader, tx, cfg, Arc::clone(&stats)));
     tokio::spawn(pump_out(rx, writer, stats));
@@ -198,12 +205,14 @@ fn spawn_pump(reader: ReadHalf, writer: WriteHalf, cfg: LinkCfg, stats: Arc<Link
 /// `read_frame` 的内部缓冲不必考虑半读状态——这是把"读"与"调度"
 /// 拆成两个 task 的原因（select 循环里直接 `read_frame` 会踩取消安全的坑，
 /// docs/20 §3.3）。
-async fn pump_in(
-    mut reader: ReadHalf,
+async fn pump_in<R>(
+    mut reader: ReadHalf<R>,
     tx: mpsc::Sender<(Frame, tokio::time::Instant)>,
     cfg: LinkCfg,
     stats: Arc<LinkStats>,
-) {
+) where
+    R: tokio::io::AsyncRead + Unpin,
+{
     let mut rng = XorShift::new(cfg.seed);
     loop {
         match reader.read_frame().await {
@@ -266,11 +275,13 @@ impl Ord for HeapItem {
 /// 堆元素 `(到达时刻, 入队序, 帧)`：序号作平局裁决——抖动为零时
 /// 严格保序（纯延迟链路不引入人为乱序），抖动非零时到达时刻交错，
 /// 乱序自然发生且可复现。
-async fn pump_out(
+async fn pump_out<W>(
     mut rx: mpsc::Receiver<(Frame, tokio::time::Instant)>,
-    mut writer: WriteHalf,
+    mut writer: WriteHalf<W>,
     stats: Arc<LinkStats>,
-) {
+) where
+    W: tokio::io::AsyncWrite + Unpin,
+{
     let mut heap: BinaryHeap<Reverse<HeapItem>> = BinaryHeap::new();
     let mut seq: u64 = 0;
     let mut rx_open = true;

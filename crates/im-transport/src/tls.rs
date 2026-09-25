@@ -18,7 +18,7 @@
 //! 握手语义：`accept`/`connect` 完整走完 TLS 握手才返回——
 //! 返回即「加密通道已建立」，调用方拿到的 [`Connection`] 上的一切
 //! 读写都自动在记录层加解密里。握手失败表现为 `io::Error`
-//!（对端拒绝、证书校验不过、证书与 ServerName 不匹配等），
+//!（对端拒绝、证书校验不过、证书与 `ServerName` 不匹配等），
 //! 归入 [`TransportError::Io`]——TLS 握手失败本质上就是这条连接的
 //! IO 失败，不值得单设错误类别。
 
@@ -131,9 +131,8 @@ impl TlsConnector {
         server_name: &str,
     ) -> Result<ClientTlsStream, TransportError> {
         let tcp = TcpStream::connect(addr).await?;
-        let name = rustls::pki_types::ServerName::try_from(server_name.to_string()).map_err(
-            |e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()),
-        )?;
+        let name = rustls::pki_types::ServerName::try_from(server_name.to_string())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
         self.inner.connect(name, tcp).await.map_err(TransportError::Io)
     }
 
@@ -195,7 +194,7 @@ mod tests {
     }
 
     /// 主线用例：TLS 之上跑既有帧协议——`Connection` 泛型化的意义
-    /// （同一套 read_frame/write_frame，底层从 TCP 换成 TLS，零改动）。
+    /// （同一套 `read_frame/write_frame，底层从` TCP 换成 TLS，零改动）。
     #[tokio::test]
     async fn frame_roundtrip_over_tls() {
         let material = TlsMaterial::generate_demo().unwrap();
@@ -238,7 +237,7 @@ mod tests {
 
     /// 线上确实有 TLS：一个**裸 TCP 服务端**（不做 TLS upgrade）
     /// 直接读客户端发来的前 5 字节——若链路是明文，第一字节就该是
-    /// 帧协议的已知明文头；实测必为 0x16（TLS ClientHello 记录类型）。
+    /// 帧协议的已知明文头；实测必为 0x16（TLS `ClientHello` 记录类型）。
     /// 这是确定性的：不并发竞争 accept，裸服务端读到的就是唯一连接。
     #[tokio::test]
     async fn wire_is_not_plaintext() {
@@ -311,7 +310,8 @@ mod tests {
         let tls = connector.connect_stream(&addr.to_string(), "localhost").await.unwrap();
         // 同上：客户端的 ShutdownTx 也要活过整个测试
         let (_client_shutdown_tx, client_shutdown_rx) = shutdown_channel();
-        let client = tokio::spawn(run_gateway_connection(tls, config, inbound_tx, client_shutdown_rx));
+        let client =
+            tokio::spawn(run_gateway_connection(tls, config, inbound_tx, client_shutdown_rx));
 
         // 客户端业务层应看到服务端回的 Pong（ack = seq+1）——
         // 心跳、网关、帧协议全部工作在 TLS 之上

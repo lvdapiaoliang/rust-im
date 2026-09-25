@@ -32,6 +32,8 @@ futures.workspace = true
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite.workspace = true
+# examples/tls_demo：阶段 12 的 TLS 端到端演示（材料生成在 im-crypto）
+im-crypto.workspace = true
 
 [[bin]]
 name = "im-server"

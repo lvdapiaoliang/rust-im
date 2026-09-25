@@ -1,0 +1,221 @@
+﻿cargo :    Compiling im-transport v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-transport)
+所在位置 行:1 字符: 5
++ & { cargo test -p im-transport --no-run 2>&1 | Out-File -Encoding utf ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling im...s\im-transport):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: unused import: `AsyncWriteExt`
+   --> crates\im-transport\src\tls.rs:158:35
+    |
+158 |     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    |                                   ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0277]: the trait bound `connection::Connection<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>: GatewayS
+tream` is not satisfied
+   --> crates\im-transport\src\tls.rs:266:17
+    |
+265 |             run_gateway_connection(
+    |             ---------------------- required by a bound introduced by this call
+266 |                 tls,
+    |                 ^^^ unsatisfied trait bound
+    |
+help: the trait `GatewayStream` is not implemented for `connection::Connection<tokio_rustls::server::TlsStream<tokio::n
+et::TcpStream>>`
+   --> crates\im-transport\src\connection.rs:74:1
+    |
+ 74 | pub struct Connection<S = TcpStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `GatewayStream`
+   --> crates\im-transport\src\gateway.rs:70:1
+    |
+ 70 | impl GatewayStream for TcpStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio::net::TcpStream`
+    |
+   ::: crates\im-transport\src\tls.rs:138:1
+    |
+138 | impl GatewayStream for ServerTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::server::TlsStream<tokio::net::TcpStream>`
+...
+146 | impl GatewayStream for ClientTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::client::TlsStream<tokio::net::TcpStream>`
+note: required by a bound in `gateway::run_gateway_connection`
+   --> crates\im-transport\src\gateway.rs:217:40
+    |
+217 | pub async fn run_gateway_connection<S: GatewayStream>(
+    |                                        ^^^^^^^^^^^^^ required by this bound in `run_gateway_connection`
+
+error[E0277]: the trait bound `connection::Connection<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>: GatewayS
+tream` is not satisfied
+   --> crates\im-transport\src\tls.rs:265:13
+    |
+265 | /             run_gateway_connection(
+266 | |                 tls,
+267 | |                 crate::gateway::GatewayConfig::default(),
+268 | |                 tokio::sync::mpsc::channel(16).0,
+269 | |                 shutdown_channel().1,
+270 | |             )
+    | |_____________^ unsatisfied trait bound
+    |
+help: the trait `GatewayStream` is not implemented for `connection::Connection<tokio_rustls::server::TlsStream<tokio::n
+et::TcpStream>>`
+   --> crates\im-transport\src\connection.rs:74:1
+    |
+ 74 | pub struct Connection<S = TcpStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `GatewayStream`
+   --> crates\im-transport\src\gateway.rs:70:1
+    |
+ 70 | impl GatewayStream for TcpStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio::net::TcpStream`
+    |
+   ::: crates\im-transport\src\tls.rs:138:1
+    |
+138 | impl GatewayStream for ServerTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::server::TlsStream<tokio::net::TcpStream>`
+...
+146 | impl GatewayStream for ClientTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::client::TlsStream<tokio::net::TcpStream>`
+note: required by a bound in `gateway::run_gateway_connection`
+   --> crates\im-transport\src\gateway.rs:217:40
+    |
+217 | pub async fn run_gateway_connection<S: GatewayStream>(
+    |                                        ^^^^^^^^^^^^^ required by this bound in `run_gateway_connection`
+
+error[E0277]: the trait bound `connection::Connection<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>: GatewayS
+tream` is not satisfied
+   --> crates\im-transport\src\tls.rs:271:14
+    |
+271 |             .await
+    |              ^^^^^ unsatisfied trait bound
+    |
+help: the trait `GatewayStream` is not implemented for `connection::Connection<tokio_rustls::server::TlsStream<tokio::n
+et::TcpStream>>`
+   --> crates\im-transport\src\connection.rs:74:1
+    |
+ 74 | pub struct Connection<S = TcpStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `GatewayStream`
+   --> crates\im-transport\src\gateway.rs:70:1
+    |
+ 70 | impl GatewayStream for TcpStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio::net::TcpStream`
+    |
+   ::: crates\im-transport\src\tls.rs:138:1
+    |
+138 | impl GatewayStream for ServerTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::server::TlsStream<tokio::net::TcpStream>`
+...
+146 | impl GatewayStream for ClientTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::client::TlsStream<tokio::net::TcpStream>`
+note: required by a bound in `gateway::run_gateway_connection`
+   --> crates\im-transport\src\gateway.rs:217:40
+    |
+217 | pub async fn run_gateway_connection<S: GatewayStream>(
+    |                                        ^^^^^^^^^^^^^ required by this bound in `run_gateway_connection`
+
+error[E0277]: the trait bound `connection::Connection<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>: GatewayS
+tream` is not satisfied
+   --> crates\im-transport\src\tls.rs:285:58
+    |
+285 |         let client = tokio::spawn(run_gateway_connection(tls, config, inbound_tx, shutdown_channel().1));
+    |                                   ---------------------- ^^^ unsatisfied trait bound
+    |                                   |
+    |                                   required by a bound introduced by this call
+    |
+help: the trait `GatewayStream` is not implemented for `connection::Connection<tokio_rustls::client::TlsStream<tokio::n
+et::TcpStream>>`
+   --> crates\im-transport\src\connection.rs:74:1
+    |
+ 74 | pub struct Connection<S = TcpStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `GatewayStream`
+   --> crates\im-transport\src\gateway.rs:70:1
+    |
+ 70 | impl GatewayStream for TcpStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio::net::TcpStream`
+    |
+   ::: crates\im-transport\src\tls.rs:138:1
+    |
+138 | impl GatewayStream for ServerTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::server::TlsStream<tokio::net::TcpStream>`
+...
+146 | impl GatewayStream for ClientTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::client::TlsStream<tokio::net::TcpStream>`
+note: required by a bound in `gateway::run_gateway_connection`
+   --> crates\im-transport\src\gateway.rs:217:40
+    |
+217 | pub async fn run_gateway_connection<S: GatewayStream>(
+    |                                        ^^^^^^^^^^^^^ required by this bound in `run_gateway_connection`
+
+error[E0277]: the trait bound `connection::Connection<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>: GatewayS
+tream` is not satisfied
+   --> crates\im-transport\src\tls.rs:285:35
+    |
+285 |         let client = tokio::spawn(run_gateway_connection(tls, config, inbound_tx, shutdown_channel().1));
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfi
+ed trait bound
+    |
+help: the trait `GatewayStream` is not implemented for `connection::Connection<tokio_rustls::client::TlsStream<tokio::n
+et::TcpStream>>`
+   --> crates\im-transport\src\connection.rs:74:1
+    |
+ 74 | pub struct Connection<S = TcpStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `GatewayStream`
+   --> crates\im-transport\src\gateway.rs:70:1
+    |
+ 70 | impl GatewayStream for TcpStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio::net::TcpStream`
+    |
+   ::: crates\im-transport\src\tls.rs:138:1
+    |
+138 | impl GatewayStream for ServerTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::server::TlsStream<tokio::net::TcpStream>`
+...
+146 | impl GatewayStream for ClientTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::client::TlsStream<tokio::net::TcpStream>`
+note: required by a bound in `gateway::run_gateway_connection`
+   --> crates\im-transport\src\gateway.rs:217:40
+    |
+217 | pub async fn run_gateway_connection<S: GatewayStream>(
+    |                                        ^^^^^^^^^^^^^ required by this bound in `run_gateway_connection`
+
+error[E0277]: the trait bound `connection::Connection<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>: GatewayS
+tream` is not satisfied
+   --> crates\im-transport\src\tls.rs:285:22
+    |
+285 |         let client = tokio::spawn(run_gateway_connection(tls, config, inbound_tx, shutdown_channel().1));
+    |                      ^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `GatewayStream` is not implemented for `connection::Connection<tokio_rustls::client::TlsStream<tokio::n
+et::TcpStream>>`
+   --> crates\im-transport\src\connection.rs:74:1
+    |
+ 74 | pub struct Connection<S = TcpStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `GatewayStream`
+   --> crates\im-transport\src\gateway.rs:70:1
+    |
+ 70 | impl GatewayStream for TcpStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio::net::TcpStream`
+    |
+   ::: crates\im-transport\src\tls.rs:138:1
+    |
+138 | impl GatewayStream for ServerTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::server::TlsStream<tokio::net::TcpStream>`
+...
+146 | impl GatewayStream for ClientTlsStream {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tokio_rustls::client::TlsStream<tokio::net::TcpStream>`
+note: required by a bound in `gateway::run_gateway_connection`
+   --> crates\im-transport\src\gateway.rs:217:40
+    |
+217 | pub async fn run_gateway_connection<S: GatewayStream>(
+    |                                        ^^^^^^^^^^^^^ required by this bound in `run_gateway_connection`
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `im-transport` (lib test) generated 1 warning
+error: could not compile `im-transport` (lib test) due to 6 previous errors; 1 warning emitted
+warning: build failed, waiting for other jobs to finish...

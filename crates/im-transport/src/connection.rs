@@ -15,7 +15,7 @@
 //!
 //! [`Connection`] 泛型于底层流 `S: AsyncRead + AsyncWrite`——同一个
 //! 帧协议层不加改动地叠在裸 TCP（`Connection<TcpStream>`）或 TLS 流
-//! （`Connection<tls::ServerTlsStream>`）上。这是 GoF 装饰器在 Rust 的
+//! （`Connection<tls::ServerTlsStream>`）上。这是 `GoF` 装饰器在 Rust 的
 //! 零成本形态：**组合 + 泛型约束**替代了面向对象的接口转发。类型默认
 //! 参数 `S = TcpStream` 让既有代码里的 `Connection` 名字与语义不变。
 //!
@@ -26,10 +26,10 @@
 //! 这是「split」模式在类型系统里的表达（更多背景见 `echo.rs` 顶部文档）。
 //!
 //! 半部实现随泛型化从 `TcpStream::into_split`（Owned 半部，TcpStream 专属）
-//! 改为 `tokio::io::split`（BiLock 半部，任何流通用）。取舍：BiLock 在
+//! 改为 `tokio::io::split`（`BiLock` 半部，任何流通用）。取舍：BiLock 在
 //! **无争用**路径接近零成本（读写各归一个 task 的标准布局），争用时才
 //! 退化为锁；换来 TLS 流与未来 QUIC 流免改动的拆分能力。M1 压测基线
-//!（99,969 连接）建立在 Owned 半部上，未因换 BiLock 重测——数字口径
+//!（99,969 连接）建立在 Owned 半部上，未因换 `BiLock` 重测——数字口径
 //! 记于 docs/18 §七。
 
 use std::collections::VecDeque;
@@ -134,11 +134,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
     /// 拆分后两者可安全地交给不同 task——
     /// 网关的标准布局：读循环 task + 写 actor task（见 [`crate::gateway`]）。
     ///
-    /// 用 `tokio::io::split`（BiLock 半部）而不是 `TcpStream::into_split`
+    /// 用 `tokio::io::split`（`BiLock` 半部）而不是 `TcpStream::into_split`
     /// （Owned 半部）：前者对任何 `AsyncRead + AsyncWrite` 都可用——
     /// TLS 流、QUIC 流与裸 TCP 走同一条拆分路径（取舍见模块文档）。
     #[must_use]
-    pub fn into_split(self) -> (ReadHalf<tokio::io::ReadHalf<S>>, WriteHalf<tokio::io::WriteHalf<S>>) {
+    pub fn into_split(
+        self,
+    ) -> (ReadHalf<tokio::io::ReadHalf<S>>, WriteHalf<tokio::io::WriteHalf<S>>) {
         let (read, write) = tokio::io::split(self.stream);
         (
             ReadHalf {
@@ -191,7 +193,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
 }
 
 /// 裸 TCP 专属能力：主动连接与对端地址（TLS 流的握手在 [`crate::tls`]，
-/// peer 地址从 TcpStream 拿一次带进去即可）。
+/// peer 地址从 `TcpStream` 拿一次带进去即可）。
 impl Connection<TcpStream> {
     /// 主动连接到 `addr`（如 `"127.0.0.1:8080"`）。
     ///
