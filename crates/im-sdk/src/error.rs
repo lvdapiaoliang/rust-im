@@ -25,24 +25,30 @@ pub const ERR_STOPPED: i32 = 2;
 pub const ERR_TIMEOUT: i32 = 3;
 /// 4：回调模式下调用 poll（事件归事件泵线程，调用方不该抢）。
 pub const ERR_POLL_WITH_CALLBACK: i32 = 4;
-/// 5：内部故障（兜底：理论上不可达，保留给防御性路径）。
+/// 5：内部故障（兑底：理论上不可达，保留给防御性路径）。
 pub const ERR_INTERNAL: i32 = 5;
+/// 6：握手被服务端拒绝（不再重连；归还的客户端只能 destroy）。
+///
+/// 阶段 12 新增（类型状态 API 的终局错误）：与 [`ERR_STOPPED`] 分开，
+/// 因为「拒了」与「停了」的调用方处置不同——前者值得立即告警用户。
+pub const ERR_HANDSHAKE_REJECTED: i32 = 6;
 
 /// 错误码 → 人读说明。
 ///
 /// 返回的是**静态字符串**（进程生命周期内有效），调用方绝不能 `free`——
 /// 这是「谁分配谁释放」契约的第一课：静态数据的所有权根本不在调用方。
 ///
-/// 索引安全：码值即下标（`0..=5`），数组长度与码值上限同步维护。
+/// 索引安全：码值即下标（`0..=6`），数组长度与码值上限同步维护。
 #[must_use]
 pub const fn error_string(code: i32) -> &'static str {
-    const STRINGS: [&str; 6] = [
+    const STRINGS: [&str; 7] = [
         "ok",
         "invalid argument (null pointer / non-utf8 string / bad length)",
         "client stopped (rejected or destroyed)",
         "timed out waiting for event",
         "poll is unavailable when a callback is registered",
         "internal error",
+        "handshake rejected by server",
     ];
     if code >= 0 {
         // 先 unsigned_abs 剥负号（u32）再扩展 usize——两步各自零损耗；
@@ -62,17 +68,24 @@ mod tests {
     /// 每个定义过的码都必须有说明文字（非空、非占位）。
     #[test]
     fn every_defined_code_has_a_string() {
-        for code in
-            [OK, ERR_INVALID_ARG, ERR_STOPPED, ERR_TIMEOUT, ERR_POLL_WITH_CALLBACK, ERR_INTERNAL]
-        {
+        for code in [
+            OK,
+            ERR_INVALID_ARG,
+            ERR_STOPPED,
+            ERR_TIMEOUT,
+            ERR_POLL_WITH_CALLBACK,
+            ERR_INTERNAL,
+            ERR_HANDSHAKE_REJECTED,
+        ] {
             assert!(!error_string(code).is_empty());
         }
     }
-
-    /// 未定义码（含负数）落到统一兜底，绝不 panic 越界。
+    
+    /// 未定义码（含负数）落到统一兑底，绝不 panic 越界。
     #[test]
     fn unknown_codes_fall_back() {
-        assert_eq!(error_string(6), "unknown error code");
+        assert_eq!(error_string(ERR_HANDSHAKE_REJECTED), "handshake rejected by server");
+        assert_eq!(error_string(7), "unknown error code");
         assert_eq!(error_string(-1), "unknown error code");
         assert_eq!(error_string(i32::MAX), "unknown error code");
     }
