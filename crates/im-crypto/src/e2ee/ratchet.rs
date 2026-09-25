@@ -39,7 +39,7 @@ use hkdf::hmac::{Hmac, Mac};
 use rand::{CryptoRng, RngCore};
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
-use zeroize::ZeroizeOnDrop;
+use zeroize::Zeroize;
 
 use crate::error::CryptoError;
 
@@ -64,7 +64,7 @@ const MSG_KEY_INFO: &[u8] = b"im-e2ee-message-key-v1";
 // ────────────────────────────────────────────────────────────────
 
 /// 消息头：告诉对端「这条消息处于棘轮的哪个位置」。
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Header {
     /// 发送方当前 DH 棘轮公钥（对端据此判断是否要推进 DH 棘轮）。
     pub dh: PublicKey,
@@ -98,7 +98,7 @@ impl Header {
 }
 
 /// 一条 E2EE 消息：头 + AES-256-GCM 密文（含认证标签）。
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RatchetMessage {
     header: Header,
     ciphertext: Vec<u8>,
@@ -139,7 +139,6 @@ impl RatchetMessage {
 ///
 /// 字段与 Signal 规范的 RatchetState 一一对应；
 /// `dh_self` 为 `None` 表示「该我发起第一轮 DH 棘轮」（Alice 初态）。
-#[derive(ZeroizeOnDrop)]
 pub struct RatchetState {
     /// 根密钥 RK：只被 DH 棘轮推进，永不直接加密消息。
     root_key: [u8; KEY_LEN],
@@ -161,6 +160,24 @@ pub struct RatchetState {
     ///
     /// 键带公钥：不同轮的旧链密钥天然分桶，排空旧链后按公钥整桶丢弃。
     skipped: HashMap<([u8; 32], u32), [u8; MSG_KEY_LEN]>,
+}
+
+impl Drop for RatchetState {
+    /// 会话状态 drop 时擦除全部密钥材料（`StaticSecret` 自带擦除，
+    /// `skipped` 里的数组不满足 `Zeroize` 派生，于是手动擦——
+    /// 宁可显式三行，也不为派生把 HashMap 换成自定义容器）。
+    fn drop(&mut self) {
+        self.root_key.zeroize();
+        if let Some(c) = &mut self.chain_send {
+            c.zeroize();
+        }
+        if let Some(c) = &mut self.chain_recv {
+            c.zeroize();
+        }
+        for (_, mk) in self.skipped.iter_mut() {
+            mk.zeroize();
+        }
+    }
 }
 
 impl RatchetState {
@@ -252,10 +269,12 @@ impl RatchetState {
         if Some(msg.header.dh) != self.dh_remote {
             if self.dh_remote.is_some() {
                 // 对端换了密钥对——先把它**上一条链**（PN 长度）的跳过密钥补齐，
-                // 防止旧链的迟到消息永远解不开
+                // 防止旧链的迟到消息永远解不开。
+                // 旧链先**拷出**再调 `&mut self` 的方法：[u8;32] 是 Copy，
+                // 借用冲突用值拷贝消解（32 字节的拷贝在这里不值一提）
                 let old_remote = self.dh_remote.expect("上面刚检查过 Some");
-                let old_chain = self.chain_recv.as_ref().expect("有旧远端公钥则有旧接收链");
-                self.skip_to(old_remote, old_chain, msg.header.prev_chain_len)?;
+                let old_chain = self.chain_recv.expect("有旧远端公钥则有旧接收链");
+                self.skip_to(old_remote, &old_chain, msg.header.prev_chain_len)?;
             }
             self.dh_ratchet_recv_side(&msg.header.dh);
         }
@@ -379,8 +398,11 @@ fn kdf_ck_next(ck: &[u8; KEY_LEN]) -> [u8; KEY_LEN] {
 }
 
 /// HMAC-SHA256(CK, 单字节输入)：对称棘轮的两条岔路共用一个原语。
+///
+/// `Mac` 与 `KeyInit` 都有 `new_from_slice`（后者是 AES-GCM 在用），
+/// 全限定写法消解歧义——这不是坏味道，是两个同名 API 的正常共存。
 fn hmac_step(ck: &[u8; KEY_LEN], input: u8) -> [u8; KEY_LEN] {
-    let mut mac = Hmac::<Sha256>::new_from_slice(ck).expect("HMAC 接受任意长度密钥");
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(ck).expect("HMAC 接受任意长度密钥");
     mac.update(&[input]);
     let mut out = [0u8; KEY_LEN];
     out.copy_from_slice(&mac.finalize().into_bytes());
