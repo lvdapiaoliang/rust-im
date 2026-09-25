@@ -359,9 +359,8 @@ mod tests {
         let srv = spawn_test_server(SessionConfig::default());
         let addr = srv.addr.clone();
     
-        let mut alice = create(&addr, 1, "t", None).unwrap();
-        let mut bob = create(&addr, 2, "t", None).unwrap();
-    
+        let mut alice = create(&addr, 1, "demo", None).unwrap();
+        let mut bob = create(&addr, 2, "demo", None).unwrap();    
         // 两端都握手成功
         for client in [&mut alice, &mut bob] {
             let ev = client.poll_event(Duration::from_secs(5)).unwrap().unwrap();
@@ -392,7 +391,7 @@ mod tests {
         let addr = srv.addr.clone();
     
         // Alice 先上、发两条给离线的 Bob、确认送达、下线
-        let mut alice = create(&addr, 1, "t", None).unwrap();
+        let mut alice = create(&addr, 1, "demo", None).unwrap();
         let (ty, _) = borrow(&alice.poll_event(Duration::from_secs(5)).unwrap().unwrap());
         assert_eq!(ty, EVENT_CONNECTED);
         alice.send(2, b"first").unwrap();
@@ -409,7 +408,7 @@ mod tests {
         alice.destroy();
     
         // Bob 上线：Connected 之后应把离线的两条逐条收全
-        let mut bob = create(&addr, 2, "t", None).unwrap();
+        let mut bob = create(&addr, 2, "demo", None).unwrap();
         let (ty, _) = borrow(&bob.poll_event(Duration::from_secs(5)).unwrap().unwrap());
         assert_eq!(ty, EVENT_CONNECTED);
     
@@ -434,20 +433,20 @@ mod tests {
             ..SessionConfig::default()
         });
         let addr = srv.addr.clone();
-    
-        let mut client = create(&addr, 1, "WRONG", None).unwrap();
+        
+        let mut client = create(&addr, 1, "demo", None).unwrap();
         let ev = client.poll_event(Duration::from_secs(5)).unwrap().unwrap();
         let (ty, reason) = borrow(&ev);
         assert_eq!(ty, EVENT_REJECTED);
         assert!(!reason.is_empty(), "拒绝原因不该是空串");
-    
-        // 状态机已落幕：命令通道的接收端没了
-        assert_eq!(client.send(2, b"x"), Err(error::ERR_STOPPED));
-        // 事件通道也已关闭
+        
+        // 状态机落幕有个微小窗口：Rejected 送达时任务还没 drop cmd_rx。
+        // 先等事件通道关闭（任务确定结束），send 的断言才是确定性的。
         assert!(matches!(
-            client.poll_event(Duration::from_secs(1)),
+            client.poll_event(Duration::from_secs(2)),
             Err(error::ERR_STOPPED)
         ));
+        assert_eq!(client.send(2, b"x"), Err(error::ERR_STOPPED));
         client.destroy();
     }
     
@@ -460,7 +459,7 @@ mod tests {
         });
         let addr = srv.addr.clone();
     
-        let mut client = create(&addr, 1, "t", None).unwrap();
+        let mut client = create(&addr, 1, "demo", None).unwrap();
         let (ty, _) = borrow(&client.poll_event(Duration::from_secs(5)).unwrap().unwrap());
         assert_eq!(ty, EVENT_CONNECTED);
         // 立刻销毁：挂死即测试超时失败
@@ -473,7 +472,7 @@ mod tests {
         let srv = spawn_test_server(SessionConfig::default());
         let addr = srv.addr.clone();
     
-        let mut client = create(&addr, 1, "t", None).unwrap();
+        let mut client = create(&addr, 1, "demo", None).unwrap();
         let ev = client.poll_event(Duration::from_secs(5)).unwrap().unwrap();
         assert_eq!(borrow(&ev).0, EVENT_CONNECTED);
         assert!(ev.data.is_null());
