@@ -134,6 +134,18 @@ impl DedupWindow {
     pub fn backlog(&self) -> u32 {
         self.bitmap.count_ones()
     }
+
+    /// 重同步：以 `seq` 为新基准重建窗口（`seq` 视为刚按序收下）。
+    ///
+    /// 供超窗（[`Verdict::TooFar`]）后的自愈：洞（帧级丢失）后第
+    /// 64 帧起全部超窗，若只会丢弃，接收窗将**永久楔死**在洞口——
+    /// 调用方应以到达帧重锚。被跳过区间里的重复帧会被判「新帧」：
+    /// 去重保护由业务层兜底（消息按 `client_msg_id` 去重，
+    /// 「至少一次」语义天然兼容多处理）。
+    pub fn resync(&mut self, seq: u64) {
+        self.rcv_nxt = seq.wrapping_add(1);
+        self.bitmap = 0;
+    }
 }
 
 /// 把「收到一帧后的去重 + ACK 回填」组合成一步。
@@ -264,6 +276,27 @@ mod tests {
         assert_eq!(w.feed(0), Verdict::InOrder);
         assert_eq!(w.feed(1), Verdict::InOrder);
         assert_eq!(w.ack(), 3, "2 的洞补上后连续吸收");
+    }
+
+    /// 重同步：以到达 seq 为新基准——洞前后的判定从新锚点继续，
+    /// 窗口后方的旧帧仍判重复（去重保护没有失效）。
+    #[test]
+    fn resync_reanchors_window() {
+        let mut w = DedupWindow::new(1);
+        assert_eq!(w.feed(1), Verdict::InOrder);
+        assert_eq!(w.feed(2), Verdict::InOrder);
+        // 帧级丢失造成的超窗跳号：重同步以 81 为新基准「收下」它
+        assert!(matches!(w.feed(81), Verdict::TooFar { .. }));
+        w.resync(81);
+        assert_eq!(w.ack(), 82);
+        // 新基准之后按序继续
+        assert_eq!(w.feed(82), Verdict::InOrder);
+        // 旧 seq 落在新窗口后方：重复
+        assert_eq!(w.feed(3), Verdict::Duplicate);
+        // 回绕安全：以 u64::MAX 重同步后从 0 继续
+        w.resync(u64::MAX);
+        assert_eq!(w.ack(), 0);
+        assert_eq!(w.feed(0), Verdict::InOrder);
     }
 
     /// 对拍性质测试：窗口范围内的随机 seq 流，

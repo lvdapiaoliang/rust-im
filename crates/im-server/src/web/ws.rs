@@ -477,9 +477,12 @@ async fn dispatch_inbound(
         }
     }
 
-    // 帧级去重：与 TCP 路径同一窗口同一语义（重发/乱序在业务前被挡下）
+    // 帧级去重：与 TCP 路径同一窗口同一语义（重发/乱序在业务前被挡下）；
+    // 超窗同样**重同步而非丢弃**（丢弃会静默楔死连接——完整论证见
+    // session.rs 的 TooFar 分支，两路接入必须同一策略）
     match session.feed_seq(frame.seq) {
-        im_transport::Verdict::Duplicate | im_transport::Verdict::TooFar { .. } => return,
+        im_transport::Verdict::Duplicate => return,
+        im_transport::Verdict::TooFar { .. } => session.resync(frame.seq),
         im_transport::Verdict::InOrder | im_transport::Verdict::OutOfOrder => {}
     }
 

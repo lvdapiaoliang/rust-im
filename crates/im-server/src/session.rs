@@ -516,6 +516,16 @@ impl SessionState {
         verdict
     }
 
+    /// 窗口重同步：以到达帧的 seq 为新基准（供 TooFar 分支调用）。
+    ///
+    /// 窗口未建时是静默 no-op——不可达的兜底（首帧必为 InOrder，
+    /// 不会 TooFar），懒初始化由随后的 [`SessionState::feed_seq`] 完成。
+    pub(crate) fn resync(&mut self, seq: u64) {
+        if let Some(window) = self.dedup.as_mut() {
+            window.resync(seq);
+        }
+    }
+
     /// 帧级累计确认：「ack 之前的 seq 我已收齐」。
     fn ack(&self) -> u64 {
         self.dedup.as_ref().map_or(0, DedupWindow::ack)
@@ -571,9 +581,18 @@ pub async fn serve_connection(
 
     // 业务帧循环：网关退出（连接死亡/关停）时 frame_rx 结束
     while let Some(event) = frame_rx.recv().await {
-        // seq 去重：应用层重发/乱序在进入业务前就被挡下
+        // seq 去重：应用层重发/乱序在进入业务前被挡下
         match state.feed_seq(event.frame.seq) {
-            Verdict::Duplicate | Verdict::TooFar { .. } => continue, // 丢弃
+            Verdict::Duplicate => continue, // 重复：丢弃
+            // 超窗：**重同步而非丢弃**。丢弃的代价是静默楔死：帧级
+            // 丢失会在窗口前方留下永不回填的洞（应用层重发用的是
+            // 新 seq，旧 seq 没人重发），洞后第 64 帧起全部超窗、
+            // 整条连接的上行业务永久进不来；而心跳不参与 seq 去重，
+            // 连接表面健康——压测 weak-link 抓出的真实缺陷（修复前
+            // 200 条 10% 双向丢包只实收 58 条，修复见 docs/16）。
+            // 重同步以到达帧为新基准；被跳过区间的重复投递由业务层
+            // 按 `client_msg_id` 去重兜底——与「至少一次」语义兼容。
+            Verdict::TooFar { .. } => state.resync(event.frame.seq),
             Verdict::InOrder | Verdict::OutOfOrder => {}             // 上递
         }
         handle_frame(sessions, &mut state, conn_id, &event.frame, &sink).await;
@@ -973,6 +992,37 @@ mod tests {
         assert_eq!(synced.len(), 1);
         assert_eq!(synced[0].to, 999, "离线载荷的 to 保持群 ID");
         assert_eq!(synced[0].msg_id, 7, "msg_id 不变（同步游标口径统一）");
+    }
+
+    /// 超窗重同步（压测 weak-link 抓出的楔死缺陷回归）：
+    /// 帧级丢失在接收窗前方留下永不回填的洞（应用层重发用新 seq），
+    /// 修复前洞后第 64 帧起被永久静默丢弃——心跳照常、上行业务全死。
+    #[tokio::test]
+    async fn too_far_resyncs_instead_of_wedging() {
+        let (addr, _sessions, shutdown) = server().await;
+        let mut client = TestClient::connect(addr).await;
+        assert!(client.handshake(1, "t").await.is_accepted());
+
+        // 按序业务帧（握手已占 seq 1，消息从 seq 2 起）
+        client.send_msg(2, b"in order").await;
+        let ack: MsgAck = client.recv().await;
+        assert_eq!(ack.client_msg_id, 1);
+
+        // 超窗跳号：模拟窗口前方 64+ 帧被帧级丢弃后、重发帧直接到达
+        client.seq = 80; // 下一帧 seq 81 > 2 + 64（窗口容量）
+        client.send_msg(2, b"beyond window").await;
+        let ack: MsgAck = client.recv().await;
+        assert_eq!(ack.client_msg_id, 2, "超窗帧应重同步后被处理，而非静默丢弃");
+
+        // 新基准之后按序继续（81 已收下 → 下一帧 82）
+        client.send_msg(2, b"continues").await;
+        let ack: MsgAck = client.recv().await;
+        assert_eq!(ack.client_msg_id, 3);
+
+        // 窗口后方的旧 seq 仍判重复：不给回执（去重没因重同步失效）
+        client.seq = 3; // 下一帧 seq 4，落在重同步后的窗口后方
+        client.send_msg(2, b"stale replay").await;
+        client.expect_silence().await;
     }
 
     /// 群分流注入：`set_group_router` 后发往「群」的消息被路由器接管
