@@ -163,11 +163,15 @@ impl TlsMaterial {
     /// 同 [`Self::server_config`]；另 TLS 1.3 不在 provider 能力面时
     /// 同样返回 [`CryptoError::Rustls`]（ring 支持，此路径实际不可达）。
     pub fn quic_server_config(&self) -> Result<ServerConfig, CryptoError> {
-        let mut config = ServerConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
-            .with_protocol_versions(&[&rustls::version::TLS13])?
-            .with_no_client_auth()
-            .with_single_cert(vec![self.server_cert_der.clone()], self.server_key_der.clone_key())
-            .map_err(CryptoError::Rustls)?;
+        let mut config =
+            ServerConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
+                .with_protocol_versions(&[&rustls::version::TLS13])?
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![self.server_cert_der.clone()],
+                    self.server_key_der.clone_key(),
+                )
+                .map_err(CryptoError::Rustls)?;
         config.alpn_protocols = vec![QUIC_ALPN.to_vec()];
         Ok(config)
     }
@@ -185,10 +189,11 @@ impl TlsMaterial {
         roots
             .add(self.ca_cert_der.clone())
             .map_err(|e| CryptoError::Rustls(rustls::Error::General(e.to_string())))?;
-        let mut config = ClientConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
-            .with_protocol_versions(&[&rustls::version::TLS13])?
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+        let mut config =
+            ClientConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
+                .with_protocol_versions(&[&rustls::version::TLS13])?
+                .with_root_certificates(roots)
+                .with_no_client_auth();
         config.alpn_protocols = vec![QUIC_ALPN.to_vec()];
         Ok(config)
     }

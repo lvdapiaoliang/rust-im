@@ -9,7 +9,7 @@
 //! | 3 | 指数退避重连、seq/ACK 去重窗口（会话层） | ✅ |
 //! | 5 | 性能优化：`io_uring`、内核调优、`SO_REUSEPORT` 多进程 | 计划 |
 //! | 12 | rustls TLS（[`tls`]：材料在 im-crypto，装配在这里；网关泛型化支持任意 [`gateway::GatewayStream`]） | ✅ |
-//! | 13 | QUIC（quinn）备用传输路径，弱网对比测试 | 计划 |
+//! | 13 | QUIC（[`quic`]：quinn 装配层，双向流实现 [`gateway::GatewayStream`] 进网关——多路复用/无队头阻塞/TLS 1.3 内建握手） | ✅ |
 //!
 //! ## 快速上手（阶段 2 的标准姿势）
 //!
@@ -53,6 +53,7 @@ pub mod dedup;
 pub mod echo;
 pub mod error;
 pub mod gateway;
+pub mod quic;
 pub mod shutdown;
 pub mod tls;
 
@@ -64,6 +65,7 @@ pub use gateway::{
     ConnectionHandle, DEFAULT_IDLE_TIMEOUT, GatewayConfig, GatewayStream, HeartbeatPolicy,
     InboundFrame, run_gateway_connection, spawn_gateway,
 };
+pub use quic::{QuicAcceptor, QuicConnection, QuicConnector, QuicStream};
 pub use shutdown::{ShutdownRx, ShutdownTx, shutdown_channel};
 pub use tls::{ClientTlsStream, ServerTlsStream, TlsAcceptor, TlsConnector};
 
