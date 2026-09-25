@@ -411,6 +411,36 @@ n，两种情况同一条代码路径。代价可忽略：链表短暂超容一�
 再 Y」的顺序假设要在每个边界上重推一遍——**边界的语义可能与常规
 路径完全相反**。
 
+### 4.8 并行集成测试共用默认 machine_id：雪花 ID 撞库，偶发失败单跑必过【阶段 14 CI】
+
+**现象**：`cargo test --workspace` 偶尔挂一个 web 集成测试，报
+`23505 唯一约束违反 "friend_requests_pkey"，键 (id)=(…) 已存在`；
+单独 `cargo test -p im-server --lib <那个测试>` 又必过。挂哪个、
+挂不挂全看运气——典型的 flaky test 签名。
+
+**根因**：雪花 ID 的唯一性契约是「**一个 machine_id 只属于一个
+发号器**」（见 `snowflake::concurrent_generators_produce_unique_ids`——
+那个测试特意给每个线程不同的 machine_id）。但 web 各测试模块的
+脚手架都写 `Sessions::new(SessionConfig::default())`，machine_id 全是
+默认值 1。Rust 测试默认**多线程并行**，于是同一进程里并存十几个
+machine_id=1 的独立发号器；两个测试在同一毫秒各发**首号**
+（sequence 都从 0 起）→ `assemble(同一时间戳, 1, 0)` 算出**同一个
+ ID** → 先后 INSERT 撞主键。「单跑必过」正是因为单跑时没有别的
+发号器跟它抢同一毫秒。
+
+**修复**：测试脚手架统一走 `db::testing::test_sessions()`——进程级
+`AtomicU64` 计数器给每个实例发不同 machine_id（`% 1024`，10 位槽
+远超测试数量），从根上让并行发号器互不重叠。修复后连跑 5 次
+全量并行测试全绿（修复前同一条命令就会偶发挂一个）。
+
+**教训**：①「偶发失败 + 单跑必过」几乎总是**并行测试间的隐藏
+共享状态**，先查「什么东西被多个测试默认为同一个值」；② 全局
+唯一 ID 生成器进测试时，唯一性的**前提**（每实例独占 machine_id /
+独占号段）必须显式满足，不能靠「测试之间应该不会那么巧」——
+CI 三平台矩阵会把这种侥幸放大成反复无常的红。这也是阶段 14
+CI 落地抓出的第一个真 bug：**把测试搬进 CI 的价值，一半在于逼出
+本地侥幸通过的 flaky。**
+
 ---
 
 ## 五、前端与跨语言边界
@@ -690,9 +720,10 @@ RuntimeException ≈ anyhow（带上下文的动态错误），但 Rust 把"抛"
 
 阶段 14 的坑已入账：幻影错误第二次实遇（§2.1 补笔——quic_demo
 E0599，同款根因不同 crate）、PowerShell 5.1 按 ANSI 读 UTF-8 无 BOM
-脚本（§6.6）。CI/文档站的配置本身未踩新坑（YAML 用 js-yaml 本地
-验证、mdbook build 本地全绿）——诚实记录：Actions 的真实 runner
-行为（postgres service 健康检查、三平台矩阵时长、Pages 部署）要
+脚本（§6.6）、并行集成测试共用默认 machine_id 撞雪花 ID（§4.8——
+CI 落地抓出的第一个真 bug）。CI/文档站的配置本身未踩新坑（YAML 用
+js-yaml 本地验证、mdbook build 本地全绿）——诚实记录：Actions 的真实
+runner 行为（postgres service 健康检查、三平台矩阵时长、Pages 部署）要
 push 后才见分晓，属未实机验证项（与 §6.4 同一纪律）。
 
 后续阶段踩到的新坑按同格式追加（阶段 14 工程化的坑进对应节）。坑是
