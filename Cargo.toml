@@ -67,7 +67,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 tokio-test = "0.4"
 tokio-tungstenite = "0.26"
 
-# ---- 加密（阶段 12：TLS + E2EE，im-crypto / im-transport）----
+# ---- 加密（阶段 12：TLS + E2EE，阶段 13：QUIC，im-crypto / im-transport）----
 # provider 一律 ring：aws-lc-rs（rustls 默认）在 Windows 需要 NASM/CMake
 # 编译链，ring 是纯 Rust+汇编、MSVC 开箱即用——本项目面向学习与跨平台，
 # 选“能被任何人一键构建”的那一个（性能差异对本项目不构成决策点）。
@@ -83,6 +83,9 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 hkdf = "0.12"
 aes-gcm = "0.10"
 zeroize = "1"
+# QUIC（阶段 13）：quinn 的 rustls 后端同样钉 ring（理由同上），
+# 不要 platform-verifier——信任锚由调用方显式提供（TlsMaterial 的窄信任模型）
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
 
 # ---- 系统接口（im-bench 连接风暴：源地址绑定的先 bind 后 connect）----
 socket2 = "0.6"

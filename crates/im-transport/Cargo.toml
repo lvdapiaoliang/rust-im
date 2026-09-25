@@ -19,6 +19,9 @@ tokio.workspace = true
 im-crypto.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
+# 阶段 13 QUIC：quinn 只在这里出现——装配层把 quinn 类型全部包住，
+# 上游（im-server/demo）只看到 rustls 配置 + QuicAcceptor/QuicConnector
+quinn.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

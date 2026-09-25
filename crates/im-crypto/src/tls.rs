@@ -34,6 +34,13 @@ use rustls::{ClientConfig, RootCertStore, ServerConfig};
 
 use crate::error::CryptoError;
 
+/// QUIC 会话层协商的应用层协议名（ALPN）。
+///
+/// RFC 9001 把 TLS 1.3 拉进 QUIC 握手，ALPN 从「可选」变成「强制」
+/// ——没有它 rustls 直接拒绝握手。写成常量而不是散落的字面量：
+/// 协议名是双端契约，两端必须逐字节一致，一处定义防止漂移。
+pub const QUIC_ALPN: &[u8] = b"rust-im/1";
+
 /// 一套可用的 TLS 材料：CA 证书 + 服务端叶子证书/私钥。
 ///
 /// 惰性存储 DER（rustls 的原生格式，PEM 只在需要落盘/人工检查时转换），
@@ -140,6 +147,51 @@ impl TlsMaterial {
             .with_root_certificates(roots)
             .with_no_client_auth())
     }
+
+    /// 构造 QUIC 服务端配置：TLS 1.3 only + ALPN。
+    ///
+    /// 与 [`Self::server_config`] 的两处差异都不是偏好，是 QUIC 规范的
+    /// 硬性要求：
+    ///
+    /// - **TLS 1.3 only**：QUIC v1（RFC 9001）只用 TLS 1.3——TLS 1.2 的
+    ///   会话恢复/密钥交换与 QUIC 的加密级别模型对不上，rustls 允许
+    ///   在配置里列出，但 QUIC 握手里必须只剩 1.3，不如在配置层就钉死；
+    /// - **ALPN**：QUIC 强制要求（见 [`QUIC_ALPN`]），缺了握手直接失败。
+    ///
+    /// # Errors
+    ///
+    /// 同 [`Self::server_config`]；另 TLS 1.3 不在 provider 能力面时
+    /// 同样返回 [`CryptoError::Rustls`]（ring 支持，此路径实际不可达）。
+    pub fn quic_server_config(&self) -> Result<ServerConfig, CryptoError> {
+        let mut config = ServerConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
+            .with_protocol_versions(&[rustls::version::TLS13])?
+            .with_no_client_auth()
+            .with_single_cert(vec![self.server_cert_der.clone()], self.server_key_der.clone_key())
+            .map_err(CryptoError::Rustls)?;
+        config.alpn_protocols = vec![QUIC_ALPN.to_vec()];
+        Ok(config)
+    }
+
+    /// 构造 QUIC 客户端配置：TLS 1.3 only + ALPN + 窄信任锚。
+    ///
+    /// 信任模型与 [`Self::client_config`] 完全一致（只信自家 CA），
+    /// 差异同 [`Self::quic_server_config`]（TLS 1.3 + ALPN）。
+    ///
+    /// # Errors
+    ///
+    /// 同 [`Self::client_config`]。
+    pub fn quic_client_config(&self) -> Result<ClientConfig, CryptoError> {
+        let mut roots = RootCertStore::empty();
+        roots
+            .add(self.ca_cert_der.clone())
+            .map_err(|e| CryptoError::Rustls(rustls::Error::General(e.to_string())))?;
+        let mut config = ClientConfig::builder_with_provider(Arc::new(ring_provider::default_provider()))
+            .with_protocol_versions(&[rustls::version::TLS13])?
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        config.alpn_protocols = vec![QUIC_ALPN.to_vec()];
+        Ok(config)
+    }
 }
 
 #[cfg(test)]
@@ -169,5 +221,18 @@ mod tests {
         let a = TlsMaterial::generate_demo().unwrap();
         let b = TlsMaterial::generate_demo().unwrap();
         assert_ne!(a.ca_cert_pem(), b.ca_cert_pem(), "CA 证书应逐次随机");
+    }
+
+    /// QUIC 配置：ALPN 双端一致 + TLS 1.3 only（两者都是 QUIC 规范要求）
+    #[test]
+    fn quic_configs_have_alpn_and_tls13_only() {
+        let material = TlsMaterial::generate_demo().unwrap();
+        let server = material.quic_server_config().unwrap();
+        let client = material.quic_client_config().unwrap();
+        assert_eq!(server.alpn_protocols, vec![QUIC_ALPN.to_vec()], "服务端 ALPN 应为项目常量");
+        assert_eq!(client.alpn_protocols, server.alpn_protocols, "双端 ALPN 必须逐字节一致");
+        // 钉 TLS 1.3：QUIC v1 的硬性要求（RFC 9001），多列一个版本都是配置事故
+        assert_eq!(server.versions, vec![rustls::Version::TLSv1_3]);
+        assert_eq!(client.versions, server.versions);
     }
 }
