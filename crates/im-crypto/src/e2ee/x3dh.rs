@@ -43,8 +43,8 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hkdf::Hkdf;
 use rand::{CryptoRng, RngCore};
 use sha2::Sha256;
-use x25519_dalek::{PublicKey, SharedSecret as X25519Shared, StaticSecret};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::ZeroizeOnDrop;
 
 use crate::error::CryptoError;
 
@@ -98,14 +98,6 @@ impl IdentityKeyPair {
     /// 用身份私钥签名（SPK 背书用）。
     fn sign(&self, msg: &[u8]) -> Signature {
         self.signing.sign(msg)
-    }
-}
-
-impl IdentityPublicKey {
-    /// X25519 公钥字节（32B）。
-    #[must_use]
-    pub fn dh_bytes(&self) -> [u8; 32] {
-        self.dh.as_bytes()[0].to_owned().into()
     }
 }
 
@@ -289,6 +281,11 @@ pub fn respond(
             )));
         }
     }
+    // Alice 用了 OPK 但 Bob 这边已消耗/不存在：两侧 DH 输入会不对称，
+    // SK 必然不同——宁可拒绝也不静默产出对不上的密钥（错误比不一致便宜）
+    if initiation.one_time_pre_key_id.is_some() && opk.is_none() {
+        return Err(CryptoError::Ratchet("initiation 引用的 OPK 已被消耗".to_string()));
+    }
 
     let mut ikm = Vec::with_capacity(F.len() + 4 * 32);
     ikm.extend_from_slice(&F);
@@ -297,10 +294,8 @@ pub fn respond(
         responder.dh.diffie_hellman(&initiation.ephemeral).as_bytes(),
     ); // DH2
     ikm.extend_from_slice(spk.secret.diffie_hellman(&initiation.ephemeral).as_bytes()); // DH3
-    if let (Some(used_id), Some(local)) = (initiation.one_time_pre_key_id, opk) {
-        if used_id == local.key_id {
-            ikm.extend_from_slice(local.secret.diffie_hellman(&initiation.ephemeral).as_bytes()); // DH4
-        }
+    if let (Some(_), Some(local)) = (initiation.one_time_pre_key_id, opk) {
+        ikm.extend_from_slice(local.secret.diffie_hellman(&initiation.ephemeral).as_bytes()); // DH4
     }
 
     Ok(SessionKey(derive_sk(&ikm)))
@@ -312,14 +307,6 @@ fn derive_sk(ikm: &[u8]) -> [u8; SK_LEN] {
     let mut sk = [0u8; SK_LEN];
     hk.expand(HKDF_INFO, &mut sk).expect("SK_LEN 与 HKDF 输出上限匹配");
     sk
-}
-
-/// X25519 共享字节的直接收敛（测试探针用：验证 DH 的对称性）。
-#[cfg(test)]
-pub(crate) fn dh_bytes(dh: X25519Shared) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out.copy_from_slice(dh.as_bytes());
-    out
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -461,12 +448,14 @@ mod tests {
         let mut rng = OsRng;
         let alice = IdentityKeyPair::generate(&mut rng);
         let bob = BobShelf::new();
-        let (id, mut public, signature) = bob.spk.bundle_part();
-        public = PublicKey::from([public.as_bytes()[0] ^ 0xFF, *public.as_bytes().get(1..).unwrap_or(&[])][0]..(public.as_bytes().get(1..).unwrap_or(&[])));
-        let _ = (id, signature); // 签名不动，公钥已换——验签必败
+        let (id, public, signature) = bob.spk.bundle_part();
+        // 翻转公钥首字节，签名不动——验签必败（防「签名移植」攻击）
+        let mut flipped = [0u8; 32];
+        flipped.copy_from_slice(public.as_bytes());
+        flipped[0] ^= 0xFF;
         let bundle = PreKeyBundle {
             identity: bob.identity.public(),
-            signed_pre_key: (id, public, signature),
+            signed_pre_key: (id, PublicKey::from(flipped), signature),
             one_time_pre_key: None,
         };
         assert!(matches!(initiate(&alice, &bundle, &mut rng), Err(CryptoError::BadSignature)));
@@ -479,11 +468,10 @@ mod tests {
         let alice = IdentityKeyPair::generate(&mut rng);
         let bob = BobShelf::new();
 
-        let (sk, mut initiation) = initiate(&alice, &bob.bundle(), &mut rng).unwrap();
+        let (_, mut initiation) = initiate(&alice, &bob.bundle(), &mut rng).unwrap();
         initiation.signed_pre_key_id += 1; // 模拟陈旧引用
         let err = respond(&bob.identity, &bob.spk, Some(&bob.opk), &initiation);
         assert!(matches!(err, Err(CryptoError::Ratchet(_))));
-        let _ = sk.expose();
     }
 
     /// 编解码往返：encode → decode 得到等值结构（含 OPK 与不含 OPK 两种）
