@@ -187,6 +187,11 @@ impl SdkClient {
     ///
     /// # Errors
     /// 见上；另见 [`crate::error`] 全表。
+    ///
+    /// # Panics
+    /// 仅当 `normalize` 对非空输入产出空序列时 panic（内部 `expect`）——
+    /// 按其类型签名这是不可能的（SyncBatch 非空则展开非空），panic 即
+    /// 程序性错误，宁可炸出声也不静默吞。
     pub fn poll_event(&mut self, timeout: std::time::Duration) -> Result<Option<ImSdkEvent>, i32> {
         let Some(events) = self.events.as_mut() else {
             return Err(error::ERR_POLL_WITH_CALLBACK);

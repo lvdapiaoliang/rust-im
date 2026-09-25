@@ -72,7 +72,13 @@ pub extern "C" fn im_sdk_error_string(code: i32) -> *const c_char {
             .collect()
     });
     let last = table.len() - 1;
-    let idx = if (0..=error::ERR_INTERNAL).contains(&code) { code as usize } else { last };
+    // try_from 收口（项目纪律：裸 cast 只在论证后用）；contains 已保证
+    // 非负，unwrap_or 只是让编译器不必猜两者的蕴含关系
+    let idx = if (0..=error::ERR_INTERNAL).contains(&code) {
+        usize::try_from(code).unwrap_or(last)
+    } else {
+        last
+    };
     table[idx].as_ptr()
 }
 
@@ -107,7 +113,9 @@ pub extern "C" fn im_sdk_client_create(
     // 泵起不来时把已建好的客户端销毁干净再报错——不留半启动的烂摊子。
     if let Some(cb) = callback {
         let events = client.take_events().expect("create 返回的客户端必然持有事件接收端");
-        if let Ok(pump) = spawn_pump(events, cb, user_data) { client.attach_pump(pump) } else {
+        if let Ok(pump) = spawn_pump(events, cb, user_data) {
+            client.attach_pump(pump)
+        } else {
             client.destroy();
             return std::ptr::null_mut();
         }
@@ -202,6 +210,11 @@ pub extern "C" fn im_sdk_client_destroy(client: *mut SdkClient) {
 ///
 /// 线程退出条件唯一：事件通道关闭 = 连接状态机已落幕（destroy 触发的
 /// shutdown 会让它退出并 drop 发送端）。通道关闭前线程不空转（recv 阻塞）。
+///
+/// 按值传参是**故意的**（不是浪费）：这是闭包捕获三连败的解法形态——
+/// 按值才能强制 spawn 闭包捕获完整 `UserData`（连带 Send 资格）；改引用
+/// 虽然行为等价，却稀释了「泵线程独占回调上下文」的所有权语义。
+#[allow(clippy::needless_pass_by_value)]
 fn pump_loop(
     mut events: tokio::sync::mpsc::Receiver<im_client::ClientEvent>,
     callback: EventCallback,
@@ -326,16 +339,10 @@ mod tests {
     /// （与 core.rs 测试同一套口径，详见那边的 `TestServer` 注释）。
     #[test]
     fn callback_pump_delivers_events_end_to_end() {
-        // 服务端挂在独立 runtime 上（drop 即停）
-        let rt = tokio::runtime::Runtime::new().expect("测试服务端运行时");
-        let (addr, _sessions, _shutdown) = rt
-            .block_on(async { im_server::spawn_server(SessionConfig::default()).await })
-            .expect("测试服务端应能启动");
-        let addr = CString::new(addr.to_string()).unwrap();
-        let token = CString::new("demo").unwrap(); // SessionConfig::default 的静态口令
-
         // C 形态的回调：extern "C" + user_data——把事件拷贝进 std 通道
-        // （回调里立即拷贝，正是「作用域契约」的模范履行）
+        // （回调里立即拷贝，正是「作用域契约」的模范履行）。
+        // 定义放在语句前（items after statements：条目从作用域开始就存在，
+        // 语句后定义只会让读者误以为有先后依赖）
         extern "C" fn on_event(ev: *mut ImSdkEvent, user: *mut c_void) {
             // SAFETY: user_data 来自 Box::leak 的 Sender，泵线程存活期间有效
             let tx = unsafe { &*(user as *const std::sync::mpsc::Sender<(i32, Vec<u8>)>) };
@@ -349,6 +356,14 @@ mod tests {
             };
             let _ = tx.send((e.type_, data));
         }
+
+        // 服务端挂在独立 runtime 上（drop 即停）
+        let rt = tokio::runtime::Runtime::new().expect("测试服务端运行时");
+        let (addr, _sessions, _shutdown) = rt
+            .block_on(async { im_server::spawn_server(SessionConfig::default()).await })
+            .expect("测试服务端应能启动");
+        let addr = CString::new(addr.to_string()).unwrap();
+        let token = CString::new("demo").unwrap(); // SessionConfig::default 的静态口令
 
         let (tx, rx) = std_channel::<(i32, Vec<u8>)>();
         let tx = std::ptr::from_mut(Box::leak(Box::new(tx))).cast::<c_void>();

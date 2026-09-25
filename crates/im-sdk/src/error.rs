@@ -44,11 +44,16 @@ pub const fn error_string(code: i32) -> &'static str {
         "poll is unavailable when a callback is registered",
         "internal error",
     ];
-    if code >= 0 && (code as usize) < STRINGS.len() {
-        STRINGS[code as usize]
-    } else {
-        "unknown error code"
+    if code >= 0 {
+        // 先 unsigned_abs 剥负号（u32）再扩展 usize——两步各自零损耗；
+        // 直接 `i32 as usize` 是先截断后扩展，负数会回绕成巨大下标
+        // （外层守卫虽能兑住，但两步拆开让「负数不可能进来」不靠心算）
+        let idx = code.unsigned_abs() as usize;
+        if idx < STRINGS.len() {
+            return STRINGS[idx];
+        }
     }
+    return "unknown error code";
 }
 
 #[cfg(test)]
