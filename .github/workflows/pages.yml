@@ -1,0 +1,51 @@
+# 阶段 14：文档站部署（mdBook → GitHub Pages）。
+#
+# 触发：master 上 docs/、book.toml 或本文件有改动时（文档没动不重发，
+# 省 runner 时间）；也支持手动触发（Actions 页面 Run workflow）。
+# 预置条件：仓库 Settings → Pages 的 Source 选「GitHub Actions」（部署
+# 用 actions/deploy-pages 官方管线，不用老式 branch 部署）。
+name: Docs
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "docs/**"
+      - "book.toml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只保留一次部署：新的 push 取消进行中的旧部署
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # 预编译二进制安装（比 cargo install 快几分钟，社区标准 action）
+      - uses: peaceiris/action-mdbook@v2
+        with:
+          mdbook-version: "0.4.40"
+      - run: mdbook build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

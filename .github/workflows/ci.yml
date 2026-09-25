@@ -6,7 +6,7 @@
 #   test   —— 三平台测试矩阵：
 #     * ubuntu：配 PostgreSQL service container，全量测试真跑
 #       （web 模块的 pool_or_skip 设计：本地无库空转保绿，CI 配真库
-#        补盲区——阶段 5 立的账在这里兑现，见 docs/21 §2）；
+#        补盲区——阶段 5 立的账在这里兑现，见 im-server db.rs）；
 #     * windows：验证 MSVC 工具链构建 + 测试（rustls 钉 ring 的
 #       「能被任何人一键构建」主张，Windows 是最容易断的那条腿）；
 #     * macos：验证 aarch64-apple 链。GitHub 的 service container

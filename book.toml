@@ -1,0 +1,18 @@
+# mdBook 配置：文档站构建入口（阶段 14）。
+#
+# 源目录是 docs/（17 篇学习文档），构建产物 book/ 不入库（.gitignore）。
+# 目录结构在 docs/SUMMARY.md（mdBook 的唯一目录来源——改目录只改那一个文件）。
+# 本地预览：`mdbook serve`（http://localhost:3000 热更新）；
+# 线上部署：push master 后 .github/workflows/pages.yml 自动构建发布 GitHub Pages。
+
+[book]
+title = "rust-im 学习文档"
+authors = ["lvdapiaoliang"]
+language = "zh-CN"
+src = "docs"
+description = "用 Rust 从零构建 IM 全栈：面向 Java 工程师的全中文学习体系"
+
+[output.html]
+git-repository-url = "https://github.com/lvdapiaoliang/rust-im"
+edit-url-template = "https://github.com/lvdapiaoliang/rust-im/edit/master/docs/{path}"
+site-url = "/rust-im/"
