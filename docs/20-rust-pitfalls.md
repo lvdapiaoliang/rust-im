@@ -777,13 +777,14 @@ CI 落地抓出的第一个真 bug）、GitHub Actions 实机验证抓出的三�
 postgres service 让 windows/macos 腿启动即失败，已拆 job 修复；② pages.yml
 的 action 名写成 `peaceiris/action-mdbook` 少个 s，报 repository not found，
 已改 `actions-mdbook`；③ Pages 未开启，configure-pages 报 Get Pages site
-failed，已加 `enablement: true` 自动开启）。CI/文档站的 YAML 本地校验
-（js-yaml）、mdbook build 本地全绿只能证明配置合法，证明不了 runner
-平台能力、第三方 action 名与 Pages 开启状态——三个缺陷都是 push 后
-WebFetch Actions 页面逐个抓出来并修掉的（递进：修一个才能跑到下一个）：
-CI（fmt/clippy/三平台矩阵/ubuntu-only postgres）已线上转绿（4m55s），
-Docs 依次修完 action 名与 Pages 开启后待复跑确认（与 §6.4 同一纪律：
-未实机验证项 push 后必须回看）。
+failed，enablement:true 又报 Resource not accessible by integration——首开 Pages
+需 admin，GITHUB_TOKEN 代不了劳，属硬人工边界，已诚实记为待办）。CI/文档
+站的 YAML 本地校验（js-yaml）、mdbook build 本地全绿只能证明配置合法，证明
+不了 runner 平台能力、第三方 action 名与 Pages 开启状态——三个缺陷都是 push
+后 WebFetch Actions 页面逐个抓出来的（递进：修一个才能跑到下一个）：
+CI（fmt/clippy/三平台矩阵/ubuntu-only postgres）已线上转绿（4m55s）；
+Docs 的两个配置 bug（action 名、YAML）已修，仅剩「仓库管理员手动开
+一次 Pages」这一人工前置未完成（同 §6.4：未实机验证/需人工项 push 后必须回看）。
 
 后续阶段踩到的新坑按同格式追加（阶段 14 工程化的坑进对应节）。坑是
 项目最有生命力的文档——**宁可文档变厚，不可经验失传**。
