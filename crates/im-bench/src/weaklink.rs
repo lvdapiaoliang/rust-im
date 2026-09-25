@@ -850,11 +850,7 @@ mod tests {
         assert_eq!(outcome.failed, 0, "8 次尝试应吃净上行丢包，实际放弃 {}", outcome.failed);
         // 下行投递是单次机会（服务端不重传投递帧）：10% 丢失如实留在
         // 到达率里——应用层 Ack 只闭环上行，这是 docs/16 记录的边界。
-        assert!(
-            outcome.received >= 68,
-            "重同步后大突发不应楔死：实收 {} / 80",
-            outcome.received
-        );
+        assert!(outcome.received >= 68, "重同步后大突发不应楔死：实收 {} / 80", outcome.received);
         assert!(outcome.upstream_attempts > 80, "双向丢包下上行必有重传");
     }
 }
