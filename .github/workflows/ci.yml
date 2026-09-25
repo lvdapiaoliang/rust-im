@@ -1,0 +1,84 @@
+# 阶段 14：持续集成矩阵。
+#
+# 三个 job 各司其职：
+#   fmt    —— 格式门槛（一台 Linux 足够，格式与平台无关）；
+#   clippy —— 静态检查门槛（pedantic 全开，本地开发口径与 CI 一致）；
+#   test   —— 三平台测试矩阵：
+#     * ubuntu：配 PostgreSQL service container，全量测试真跑
+#       （web 模块的 pool_or_skip 设计：本地无库空转保绿，CI 配真库
+#        补盲区——阶段 5 立的账在这里兑现，见 docs/21 §2）；
+#     * windows：验证 MSVC 工具链构建 + 测试（rustls 钉 ring 的
+#       「能被任何人一键构建」主张，Windows 是最容易断的那条腿）；
+#     * macos：验证 aarch64-apple 链。GitHub 的 service container
+#       仅支持 Linux runner，windows/macos 的数据库测试按
+#       pool_or_skip 设计空转（2s 连接超时后 skip，不误报）。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy (pedantic, zero warning)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # 零警告口径：与本地开发同一命令（workspace lints 统一开启
+      # all + pedantic，见根 Cargo.toml）
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # PostgreSQL service：容器侧口令/库名与 db.rs 的约定对齐
+    #（DATABASE_URL 覆盖机制是阶段 5 预留的 CI 入口）
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: im
+          POSTGRES_PASSWORD: im123456
+          POSTGRES_DB: im
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U im"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # 非 Linux runner 没有 service container，这条连接串必然连不上——
+      # pool_or_skip 会空转跳过数据库测试（设计如此，见 db.rs）
+      DATABASE_URL: postgres://im:im123456@127.0.0.1:5432/im?sslmode=disable
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      # 示例也是交付物的一部分：tls_demo / quic_demo 全链路自检
+      #（内部自带断言，跑通即通过；Windows/macOS 一并验证平台兼容）
+      - run: cargo run -p im-server --example tls_demo
+      - run: cargo run -p im-server --example quic_demo
