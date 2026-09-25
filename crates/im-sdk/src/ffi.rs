@@ -40,7 +40,7 @@ const VERSION_CSTR: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
 ///
 /// 裸指针天生 `!Send`（编译器不知道 C 侧的数据是否可跨线程访问），
 /// 而 `std::thread::spawn` 要求闭包 `Send`——FFI SDK 的经典两难。
-/// 包装并手动声明 `Send` 的成立条件由**调用方契约**背书：user_data
+/// 包装并手动声明 `Send` 的成立条件由**调用方契约**`背书：user_data`
 /// 指向的数据在客户端销毁前有效、且可从回调线程访问（C 侧保证）。
 struct UserData(*mut c_void);
 // SAFETY: 成立条件如上——契约由 im_sdk.h 的线程契约条文固定。
@@ -107,12 +107,9 @@ pub extern "C" fn im_sdk_client_create(
     // 泵起不来时把已建好的客户端销毁干净再报错——不留半启动的烂摊子。
     if let Some(cb) = callback {
         let events = client.take_events().expect("create 返回的客户端必然持有事件接收端");
-        match spawn_pump(events, cb, user_data) {
-            Ok(pump) => client.attach_pump(pump),
-            Err(_) => {
-                client.destroy();
-                return std::ptr::null_mut();
-            }
+        if let Ok(pump) = spawn_pump(events, cb, user_data) { client.attach_pump(pump) } else {
+            client.destroy();
+            return std::ptr::null_mut();
         }
     }
     Box::into_raw(Box::new(client))
@@ -291,7 +288,7 @@ mod tests {
         assert_eq!(unknown.to_bytes(), b"unknown error code");
     }
 
-    /// 入参防御：null 字符串 → null 句柄；null 句柄 send/poll → INVALID_ARG。
+    /// 入参防御：null 字符串 → null 句柄；null 句柄 send/poll → `INVALID_ARG`。
     #[test]
     fn invalid_arguments_are_rejected_not_dereferenced() {
         assert!(
@@ -310,7 +307,7 @@ mod tests {
         assert_eq!(rc, error::ERR_INVALID_ARG);
 
         let mut out: *mut ImSdkEvent = std::ptr::null_mut();
-        let rc = im_sdk_client_poll_event(std::ptr::null_mut(), &mut out, 1);
+        let rc = im_sdk_client_poll_event(std::ptr::null_mut(), &raw mut out, 1);
         assert_eq!(rc, error::ERR_INVALID_ARG);
         // null 出参也是调用方错误
         let rc = im_sdk_client_poll_event(std::ptr::null_mut(), std::ptr::null_mut(), 1);
@@ -322,11 +319,11 @@ mod tests {
         unsafe { im_sdk_event_free(std::ptr::null_mut()) };
     }
 
-    /// 回调模式端到端（C 形态的回调 + user_data 裸指针过 Send 包装）：
+    /// 回调模式端到端（C 形态的回调 + `user_data` 裸指针过 Send 包装）：
     /// 泵线程把 Connected/Message 送达回调，事件作用域契约由拷贝履行。
     ///
-    /// 普通 #[test]：SDK 同步入口内部 block_on，不能在 tokio 上下文里调
-    /// （与 core.rs 测试同一套口径，详见那边的 TestServer 注释）。
+    /// 普通 #[test]：SDK 同步入口内部 `block_on，不能在` tokio 上下文里调
+    /// （与 core.rs 测试同一套口径，详见那边的 `TestServer` 注释）。
     #[test]
     fn callback_pump_delivers_events_end_to_end() {
         // 服务端挂在独立 runtime 上（drop 即停）
@@ -354,7 +351,7 @@ mod tests {
         }
 
         let (tx, rx) = std_channel::<(i32, Vec<u8>)>();
-        let tx = Box::leak(Box::new(tx)) as *mut _ as *mut c_void;
+        let tx = std::ptr::from_mut(Box::leak(Box::new(tx))).cast::<c_void>();
 
         let alice = im_sdk_client_create(
             addr.as_ptr(),
@@ -381,7 +378,7 @@ mod tests {
         );
         assert!(!bob.is_null());
         let mut ev: *mut ImSdkEvent = std::ptr::null_mut();
-        let rc = im_sdk_client_poll_event(bob, &mut ev, 5_000);
+        let rc = im_sdk_client_poll_event(bob, &raw mut ev, 5_000);
         assert_eq!(rc, error::OK);
         // SAFETY: poll 成功即移交所有权
         assert_eq!(unsafe { (*ev).type_ }, EVENT_CONNECTED);
@@ -397,12 +394,12 @@ mod tests {
         assert_eq!(data, b"via-pump");
 
         // 回调模式下 poll 必须被拒（事件接收端已被泵移走——互斥的物化）
-        let rc = im_sdk_client_poll_event(alice, &mut ev, 1);
+        let rc = im_sdk_client_poll_event(alice, &raw mut ev, 1);
         assert_eq!(rc, error::ERR_POLL_WITH_CALLBACK);
 
         im_sdk_client_destroy(alice);
         im_sdk_client_destroy(bob);
         // SAFETY: tx 由 Box::leak 而来，此处收回（泵线程已 join，无并发访问）
-        drop(unsafe { Box::from_raw(tx as *mut std::sync::mpsc::Sender<(i32, Vec<u8>)>) });
+        drop(unsafe { Box::from_raw(tx.cast::<std::sync::mpsc::Sender<(i32, Vec<u8>)>>()) });
     }
 }

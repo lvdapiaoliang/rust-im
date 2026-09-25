@@ -302,13 +302,13 @@ mod tests {
 
     /// 测试宿主：服务端任务的专属 runtime + 监听地址，存活到测试结束。
     ///
-    /// SDK 的同步入口内部 block_on，**不能在 tokio 上下文里调**
+    /// SDK 的同步入口内部 `block_on`，**不能在 tokio 上下文里调**
     /// （「Cannot start a runtime from within a runtime」）——这恰恰是
     /// 真实 C 调用方的常态：没有环境 runtime。所以测试一律用普通 #[test]，
     /// 服务端挂在独立 runtime 上（drop 即停），SDK 从测试线程同步调用——
     /// 与未来 JNI/C 消费者的调用形态完全一致。
     struct TestServer {
-        /// 服务端 accept/连接任务的宿主：存活到 TestServer drop，否则服务端随之停摆
+        /// 服务端 accept/连接任务的宿主：存活到 `TestServer` drop，否则服务端随之停摆
         _rt: Runtime,
         addr: String,
         _sessions: im_server::Sessions,
@@ -369,7 +369,7 @@ mod tests {
         bob.destroy();
     }
 
-    /// 离线消息 → SyncBatch → normalize 展开成逐条 Message（保序）。
+    /// 离线消息 → `SyncBatch` → normalize 展开成逐条 Message（保序）。
     #[test]
     fn sync_batch_expands_into_individual_messages() {
         let srv = spawn_test_server(SessionConfig::default());
@@ -410,7 +410,7 @@ mod tests {
         bob.destroy();
     }
 
-    /// 握手被拒：Rejected 事件携带 reason 数据；此后 send 返回 ERR_STOPPED。
+    /// 握手被拒：Rejected 事件携带 reason 数据；此后 send 返回 `ERR_STOPPED`。
     #[test]
     fn rejected_handshake_yields_event_then_stopped() {
         let srv = spawn_test_server(SessionConfig {

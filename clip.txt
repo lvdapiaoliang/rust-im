@@ -1,0 +1,94 @@
+﻿cargo :     Checking im-protocol v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-protocol)
+所在位置 行:1 字符: 5
++ & { cargo clippy -p im-sdk --all-targets 2>&1 | Out-File -Encoding ut ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking im...es\im-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Checking im-crypto v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-crypto)
+    Checking im-storage v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-storage)
+    Checking im-transport v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-transport)
+    Checking im-client v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-client)
+    Checking im-server v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-server)
+    Checking im-sdk v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-sdk)
+warning: docs for function which may panic missing `# Panics` section
+   --> crates\im-sdk\src\core.rs:190:5
+    |
+190 |     pub fn poll_event(&mut self, timeout: std::time::Duration) -> Result<Option<ImSdkEvent>, i32> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: first possible panic found here
+   --> crates\im-sdk\src\core.rs:212:21
+    |
+212 |                     self.pending.pop_front().expect("normalize 瀵归潪绌鸿緭鍏ヨ嚦灏戜骇鍑轰竴鏉?)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#missing_panics
+_doc
+    = note: `-W clippy::missing-panics-doc` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::missing_panics_doc)]`
+
+warning: casting `i32` to `usize` may lose the sign of the value
+  --> crates\im-sdk\src\error.rs:47:21
+   |
+47 |     if code >= 0 && (code as usize) < STRINGS.len() {
+   |                     ^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cast_sign_loss
+   = note: `-W clippy::cast-sign-loss` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::cast_sign_loss)]`
+
+warning: casting `i32` to `usize` may lose the sign of the value
+  --> crates\im-sdk\src\error.rs:48:17
+   |
+48 |         STRINGS[code as usize]
+   |                 ^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cast_sign_loss
+
+warning: casting `i32` to `usize` may lose the sign of the value
+  --> crates\im-sdk\src\ffi.rs:75:62
+   |
+75 |     let idx = if (0..=error::ERR_INTERNAL).contains(&code) { code as usize } else { last };
+   |                                                              ^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cast_sign_loss
+
+warning: this argument is passed by value, but not consumed in the function body
+   --> crates\im-sdk\src\ffi.rs:208:16
+    |
+208 |     user_data: UserData,
+    |                ^^^^^^^^
+    |
+help: or consider marking this type as `Copy`
+   --> crates\im-sdk\src\ffi.rs:45:1
+    |
+ 45 | struct UserData(*mut c_void);
+    | ^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_pass_
+by_value
+    = note: `-W clippy::needless-pass-by-value` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::needless_pass_by_value)]`
+help: consider taking a reference instead
+    |
+208 |     user_data: &UserData,
+    |                +
+
+warning: `im-sdk` (lib) generated 5 warnings
+warning: adding items after statements is confusing, since items exist from the start of the scope
+   --> crates\im-sdk\src\ffi.rs:339:9
+    |
+339 | /         extern "C" fn on_event(ev: *mut ImSdkEvent, user: *mut c_void) {
+340 | |             // SAFETY: user_data 鏉ヨ嚜 Box::leak 鐨?Sender锛屾车绾跨▼瀛樻椿鏈熼棿鏈夋晥
+341 | |             let tx = unsafe { &*(user as *const std::sync::mpsc::Sender<(i32, Vec<u8>)>) };
+...   |
+350 | |             let _ = tx.send((e.type_, data));
+351 | |         }
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#items_after_st
+atements
+    = note: `-W clippy::items-after-statements` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::items_after_statements)]`
+
+warning: `im-sdk` (lib test) generated 6 warnings (5 duplicates)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.13s
