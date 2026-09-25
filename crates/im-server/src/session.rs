@@ -50,8 +50,8 @@ use std::time::Duration;
 
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload, SyncReq, SyncResp};
 use im_transport::{
-    DedupWindow, GatewayConfig, InboundFrame, ShutdownRx, ShutdownTx, TransportError, Verdict,
-    shutdown_channel, spawn_gateway,
+    DedupWindow, GatewayConfig, GatewayStream, InboundFrame, ShutdownRx, ShutdownTx,
+    TransportError, Verdict, shutdown_channel, spawn_gateway,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -551,6 +551,10 @@ pub(crate) async fn reply<T: Payload>(
 /// 本函数是**会话生命周期**的唯一属主（网关是连接生命周期的属主）：
 /// 它返回即会话终结、路由注销完成。
 ///
+/// 连接类型是泛型的（阶段 12）：裸 `TcpStream` 与 TLS 流都满足
+/// [`GatewayStream`]，会话核心对「下面是不是加密的」无感——
+/// 换传输 = 换接入层的装配，会话层零改动（依赖倒置的兑现）。
+///
 /// 优雅关闭的链式传导：会话 task 退出 → 本地 `frame_rx` drop →
 /// 网关读循环的 `inbound.send` 失败 → 网关回收连接 → TCP 关闭。
 /// 不需要显式「关连接」的信号——**通道的 drop 就是信号**。
@@ -562,10 +566,10 @@ pub(crate) async fn reply<T: Payload>(
 /// # Panics
 ///
 /// 网关 task panic 时 panic（属实现 bug，应立即暴露）。
-pub async fn serve_connection(
+pub async fn serve_connection<S: GatewayStream>(
     sessions: &Sessions,
     conn_id: u64,
-    stream: TcpStream,
+    stream: S,
     gateway_config: GatewayConfig,
     shutdown: ShutdownRx,
 ) -> Result<(), TransportError> {
