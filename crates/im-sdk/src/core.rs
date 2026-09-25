@@ -154,11 +154,13 @@ pub fn create(
     // run_client 内部 tokio::spawn：必须在运行时上下文里调用
     let handle = runtime.block_on(async { im_client::run_client(config, events_tx, shutdown_rx).await });
 
-    let (pump, events) = if let Some(cb) = callback {
-        let pump = spawn_pump(events_rx, cb, user_data);
-        (Some(pump), None)
-    } else {
-        (None, Some(events_rx))
+    let (pump, events) = match callback {
+        Some(cb) => {
+            let pump =
+                spawn_pump(events_rx, cb, user_data).map_err(|_| error::ERR_INTERNAL)?;
+            (Some(pump), None)
+        }
+        None => (None, Some(events_rx)),
     };
 
     Ok(SdkClient { runtime, handle, shutdown, events, pending: VecDeque::new(), pump })
@@ -173,7 +175,7 @@ fn spawn_pump(
     events: mpsc::Receiver<ClientEvent>,
     callback: EventCallback,
     user_data: *mut core::ffi::c_void,
-) -> std::thread::JoinHandle<()> {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("im-sdk-event-pump".into())
         .spawn(move || {
@@ -188,7 +190,6 @@ fn spawn_pump(
                 }
             }
         })
-        .expect("事件泵线程创建失败（线程资源不足）")
 }
 
 impl SdkClient {
@@ -357,8 +358,8 @@ mod tests {
         // 两端都握手成功
         for client in [&mut alice, &mut bob] {
             let ev = client.poll_event(Duration::from_secs(5)).unwrap().unwrap();
-            assert_eq!(unsafe (*ev).type_, EVENT_CONNECTED);
-            assert!(unsafe (*ev).session_id > 0);
+            assert_eq!(unsafe { (*ev).type_ }, EVENT_CONNECTED);
+            assert!(unsafe { (*ev).session_id } > 0);
             unsafe { free_event(ev) };
         }
 
@@ -412,7 +413,7 @@ mod tests {
         let mut acks = 0;
         while acks < 2 {
             let ev = alice.poll_event(Duration::from_secs(5)).unwrap().unwrap();
-            if unsafe (*ev).type_ == EVENT_ACK {
+            if unsafe { (*ev).type_ } == EVENT_ACK {
                 acks += 1;
             }
             unsafe { free_event(ev) };
@@ -459,17 +460,16 @@ mod tests {
 
         let (tx, rx) = std_channel::<(i32, Vec<u8>)>();
         let tx = Box::leak(Box::new(tx)) as *mut _ as *mut core::ffi::c_void;
-        let alice = create(&addr, 1, "t", None, Some(on_event), tx).unwrap();
-        let bob = create(&addr, 2, "t", None, None, std::ptr::null_mut()).unwrap();
+        let mut alice = create(&addr, 1, "t", None, Some(on_event), tx).unwrap();
+        let mut bob = create(&addr, 2, "t", None, None, std::ptr::null_mut()).unwrap();
 
         // 事件泵先送 Connected
         let (ty, _) = rx.recv_timeout(Duration::from_secs(10)).expect("应收到 Connected");
         assert_eq!(ty, EVENT_CONNECTED);
 
         // Bob 发给 Alice：Alice 的泵应送出 Message（内容经拷贝存活）
-        let mut bob = bob;
         let ev = bob.poll_event(Duration::from_secs(5)).unwrap().unwrap();
-        assert_eq!(unsafe (*ev).type_, EVENT_CONNECTED);
+        assert_eq!(unsafe { (*ev).type_ }, EVENT_CONNECTED);
         unsafe { free_event(ev) };
         bob.send(1, b"via-pump").unwrap();
 
@@ -478,8 +478,10 @@ mod tests {
         assert_eq!(data, b"via-pump");
 
         // 回调模式下 poll 必须被拒绝（事件归泵线程，两条路互斥）
-        let mut alice = alice;
-        assert_eq!(alice.poll_event(Duration::from_secs(1)), Err(error::ERR_POLL_WITH_CALLBACK));
+        assert!(matches!(
+            alice.poll_event(Duration::from_secs(1)),
+            Err(error::ERR_POLL_WITH_CALLBACK)
+        ));
 
         alice.destroy();
         bob.destroy();
@@ -507,7 +509,10 @@ mod tests {
         // 状态机已落幕：命令通道的接收端没了
         assert_eq!(client.send(2, b"x"), Err(error::ERR_STOPPED));
         // 事件通道也已关闭
-        assert_eq!(client.poll_event(Duration::from_secs(1)), Err(error::ERR_STOPPED));
+        assert!(matches!(
+            client.poll_event(Duration::from_secs(1)),
+            Err(error::ERR_STOPPED)
+        ));
         client.destroy();
     }
 

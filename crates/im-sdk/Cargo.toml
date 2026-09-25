@@ -27,6 +27,7 @@ jni = { version = "0.21", optional = true }
 [dev-dependencies]
 # 测试直接对真实会话核心跑端到端（与 im-bench 同款服务端）
 im-server.workspace = true
+anyhow.workspace = true
 tokio-test.workspace = true
 
 [features]
