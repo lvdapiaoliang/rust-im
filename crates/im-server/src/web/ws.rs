@@ -542,8 +542,7 @@ async fn handle_signal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{SessionConfig, Sessions};
-    use crate::web::db::testing::pool_or_skip;
+    use crate::web::db::testing::{pool_or_skip, test_sessions};
 
     /// 翻译层：msg 上行往返（信封 → 帧 → 载荷字段一致，content 整体序列化）。
     #[test]
@@ -684,7 +683,7 @@ mod tests {
     async fn ws_server_or_skip() -> Option<(String, AppState)> {
         let pool = pool_or_skip().await?;
         let root = std::env::temp_dir().join(format!("im-ws-{}", uuid::Uuid::new_v4()));
-        let sessions = Sessions::new(SessionConfig::default());
+        let sessions = test_sessions();
         let state = AppState::new(pool, sessions, &root).await.ok()?;
         let app = super::super::api::router(state.clone());
 

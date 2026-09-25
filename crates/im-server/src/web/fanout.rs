@@ -326,10 +326,9 @@ async fn actor_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::SessionConfig;
     use crate::sink::{FrameSink, SendFuture, TrySendError};
     use crate::web::account::AccountStore;
-    use crate::web::db::testing::pool_or_skip;
+    use crate::web::db::testing::{pool_or_skip, test_sessions};
     use bytes::Bytes;
     use im_protocol::{Frame, Payload};
     use im_transport::TransportError;
@@ -360,7 +359,7 @@ mod tests {
     /// （PG 不可达则跳过——与 web 模块其余测试同一约定）。
     async fn hub_or_skip() -> Option<(GroupHub, GroupStore, AccountStore, Sessions)> {
         let pool = pool_or_skip().await?;
-        let sessions = Sessions::new(SessionConfig::default());
+        let sessions = test_sessions();
         let store = GroupStore::new(pool.clone());
         let accounts = AccountStore::new(pool);
         let hub = GroupHub::new(store.clone(), sessions.clone());
@@ -591,7 +590,7 @@ mod tests {
     /// 内存成员源 + `with_source` 装配：不连库也能孵化 actor 并扇出。
     #[tokio::test]
     async fn in_memory_source_fans_out_without_db() {
-        let sessions = Sessions::new(SessionConfig::default());
+        let sessions = test_sessions();
         let hub = GroupHub::with_source(Arc::new(MemSource(vec![101, 102, 103])), sessions.clone());
 
         // 三名成员全部在线；发送者 999 不是成员：delivered 口径就是成员数

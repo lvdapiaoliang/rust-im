@@ -654,7 +654,7 @@ fn url_friendly(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::db::testing::pool_or_skip;
+    use crate::web::db::testing::{pool_or_skip, test_sessions};
     use axum::body::Body;
     use axum::http::Request;
     use tower::util::ServiceExt;
@@ -664,7 +664,7 @@ mod tests {
     async fn app_or_skip() -> Option<(Router, PgPool, PathBuf)> {
         let pool = pool_or_skip().await?;
         let root = std::env::temp_dir().join(format!("im-files-{}", uuid::Uuid::new_v4()));
-        let sessions = Sessions::new(crate::session::SessionConfig::default());
+        let sessions = test_sessions();
         let state = AppState::new(pool.clone(), sessions, &root).await.ok()?;
         Some((router(state), pool, root))
     }
