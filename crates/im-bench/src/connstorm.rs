@@ -137,52 +137,7 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
 
     // ── 风暴：波次进行，建连相与握手相分开计时 ──
     let t_storm = Instant::now();
-    let mut held: Vec<Connection> = Vec::with_capacity(args.connections);
-    let mut next_user_id: u64 = 1;
-    let mut connect_ns: u128 = 0;
-    let mut handshake_ns: u128 = 0;
-    let mut failures: HashMap<String, usize> = HashMap::new();
-
-    for chunk in (0..args.connections).collect::<Vec<_>>().chunks(args.wave) {
-        // 建连相：阻塞池并行 connect（源 IP 轮换）
-        let t0 = Instant::now();
-        let mut connects = JoinSet::new();
-        for &idx in chunk {
-            let local = source_ip(idx, args.source_ips);
-            let server = addr;
-            connects.spawn_blocking(move || connect_bound(local, server));
-        }
-        let mut streams = Vec::with_capacity(chunk.len());
-        while let Some(joined) = connects.join_next().await {
-            match joined.expect("连接 task 不应 panic") {
-                Ok(stream) => streams.push(stream),
-                Err(e) => *failures.entry(format!("connect: {e}")).or_insert(0) += 1,
-            }
-        }
-        connect_ns += t0.elapsed().as_nanos();
-
-        // 握手相：每连接一个短命 task（发帧、等应答、退 task 时连接入保活袋）
-        let t0 = Instant::now();
-        let mut shakes = JoinSet::new();
-        for stream in streams {
-            let user_id = next_user_id; // 一条连接一个身份，路由表里的行才有意义
-            next_user_id += 1;
-            let wait = Duration::from_millis(args.handshake_timeout_ms);
-            shakes.spawn(async move {
-                let mut conn = Connection::new(stream);
-                let result = handshake(&mut conn, user_id, "storm", wait).await;
-                (conn, result)
-            });
-        }
-        while let Some(joined) = shakes.join_next().await {
-            let (conn, result) = joined.expect("握手 task 不应 panic");
-            match result {
-                Ok(()) => held.push(conn),
-                Err(e) => *failures.entry(format!("handshake: {e}")).or_insert(0) += 1,
-            }
-        }
-        handshake_ns += t0.elapsed().as_nanos();
-    }
+    let (held, connect_ns, handshake_ns, failures) = run_storm(args, addr).await;
 
     // ── 守恒校验：在线数必须等于保活袋大小 ──
     let online = sessions.online_count();
@@ -227,6 +182,65 @@ pub async fn conn_storm(args: &ConnStormArgs) -> Result<()> {
     )?;
     shutdown_tx.trigger();
     Ok(())
+}
+
+/// 风暴主体：波次进行，建连相与握手相分开计时。
+///
+/// 建连相在 `spawn_blocking` 池里并行 connect（源 IP 轮换），握手相
+/// 每连接一个短命 task——两相分开，报告里才能各自给出速率。
+///
+/// 返回（保活袋，建连相纳秒，握手相纳秒，失败分类）。
+async fn run_storm(
+    args: &ConnStormArgs,
+    addr: SocketAddr,
+) -> (Vec<Connection>, u128, u128, HashMap<String, usize>) {
+    let mut held: Vec<Connection> = Vec::with_capacity(args.connections);
+    let mut next_user_id: u64 = 1; // 一条连接一个身份，路由表里的行才有意义
+    let mut connect_ns: u128 = 0;
+    let mut handshake_ns: u128 = 0;
+    let mut failures: HashMap<String, usize> = HashMap::new();
+
+    for chunk in (0..args.connections).collect::<Vec<_>>().chunks(args.wave) {
+        // 建连相：阻塞池并行 connect（源 IP 轮换）
+        let t0 = Instant::now();
+        let mut connects = JoinSet::new();
+        for &idx in chunk {
+            let local = source_ip(idx, args.source_ips);
+            let server = addr;
+            connects.spawn_blocking(move || connect_bound(local, server));
+        }
+        let mut streams = Vec::with_capacity(chunk.len());
+        while let Some(joined) = connects.join_next().await {
+            match joined.expect("连接 task 不应 panic") {
+                Ok(stream) => streams.push(stream),
+                Err(e) => *failures.entry(format!("connect: {e}")).or_insert(0) += 1,
+            }
+        }
+        connect_ns += t0.elapsed().as_nanos();
+
+        // 握手相：每连接一个短命 task（发帧、等应答、退 task 时连接入保活袋）
+        let t0 = Instant::now();
+        let mut shakes = JoinSet::new();
+        for stream in streams {
+            let user_id = next_user_id;
+            next_user_id += 1;
+            let wait = Duration::from_millis(args.handshake_timeout_ms);
+            shakes.spawn(async move {
+                let mut conn = Connection::new(stream);
+                let result = handshake(&mut conn, user_id, "storm", wait).await;
+                (conn, result)
+            });
+        }
+        while let Some(joined) = shakes.join_next().await {
+            let (conn, result) = joined.expect("握手 task 不应 panic");
+            match result {
+                Ok(()) => held.push(conn),
+                Err(e) => *failures.entry(format!("handshake: {e}")).or_insert(0) += 1,
+            }
+        }
+        handshake_ns += t0.elapsed().as_nanos();
+    }
+    (held, connect_ns, handshake_ns, failures)
 }
 
 /// 报告输出（含守恒与内存账本）。
