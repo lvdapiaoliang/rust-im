@@ -1,0 +1,36 @@
+﻿cargo :    Compiling im-sdk v0.1.0 (D:\0-develop\0-Rust\2-projects\rust-im\crates\im-sdk)
+所在位置 行:1 字符: 5
++ & { cargo test -p im-sdk 2>&1 | Out-File -Encoding utf8 sdk_test.txt; ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling im...\crates\im-sdk):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.29s
+     Running unittests src\lib.rs (target\debug\deps\im_sdk-85e014d0ef55fcac.exe)
+
+running 15 tests
+test error::tests::unknown_codes_fall_back ... ok
+test ffi::tests::invalid_arguments_are_rejected_not_dereferenced ... ok
+test error::tests::every_defined_code_has_a_string ... ok
+test ffi::tests::static_strings_return_stable_pointers ... ok
+test tests::sdk_version_exposed ... ok
+test tests::c_abi_symbols_are_reachable_from_rust ... ok
+test native::tests::rejected_handshake_returns_client_for_destroy ... ok
+test core::tests::destroy_shuts_down_cleanly_without_hanging ... ok
+test core::tests::rejected_handshake_yields_event_then_stopped ... ok
+test core::tests::poll_roundtrip_delivers_message_between_two_clients ... ok
+test native::tests::typed_flow_connects_then_sends ... ok
+test core::tests::sync_batch_expands_into_individual_messages ... ok
+test ffi::tests::callback_pump_delivers_events_end_to_end ... ok
+test core::tests::empty_payload_events_have_null_data ... ok
+test native::tests::timeout_hands_back_live_client ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+   Doc-tests im_sdk
+
+running 1 test
+test crates\im-sdk\src\native.rs - native::TypedSdkClient (line 65) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+

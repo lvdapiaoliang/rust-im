@@ -232,16 +232,20 @@ mod tests {
         let srv: TestServer = spawn_test_server(im_server::SessionConfig::default());
         let addr = srv.addr.clone();
 
-        let alice = TypedSdkClient::new(&addr, 1, "demo", None)
-            .unwrap()
-            .wait_connected(WAIT)
-            .expect("默认口令的握手应当成功");
+        // 成功侧同样不能 expect：Err 侧是 (客户端, 错误码) 元组，句柄不实现
+        // Debug（不打印不复制），两条路径统一手写 match 拆包
+        let alice = match TypedSdkClient::new(&addr, 1, "demo", None).unwrap().wait_connected(WAIT)
+        {
+            Ok(connected) => connected,
+            Err((_, code)) => panic!("默认口令的握手应当成功，实际错误码 {code}"),
+        };
         assert!(alice.session_id() > 0, "Connected 事件应携带非零 session_id");
 
-        let bob = TypedSdkClient::new(&addr, 2, "demo", None)
-            .unwrap()
-            .wait_connected(WAIT)
-            .expect("Bob 同样应握手成功");
+        let mut bob =
+            match TypedSdkClient::new(&addr, 2, "demo", None).unwrap().wait_connected(WAIT) {
+                Ok(connected) => connected,
+                Err((_, code)) => panic!("Bob 同样应握手成功，实际错误码 {code}"),
+            };
 
         // 类型状态的主线证明：这里写的是 alice.send——
         // 换成握手前的形态，这行根本编译不过（见结构体文档的 compile_fail）
@@ -265,9 +269,12 @@ mod tests {
         let addr = srv.addr.clone();
 
         let client = TypedSdkClient::new(&addr, 1, "demo", None).unwrap();
-        let (client, code) = client
-            .wait_connected(WAIT)
-            .expect_err("错误口令的握手必须失败");
+        // expect_err 需要 Ok 侧 Debug——句柄故意不实现 Debug（不打印不复制），
+        // 错误路径用手写 match 拆包
+        let (client, code) = match client.wait_connected(WAIT) {
+            Ok(_) => panic!("错误口令的握手必须失败"),
+            Err(returned) => returned,
+        };
         assert_eq!(code, error::ERR_HANDSHAKE_REJECTED);
         // 归还的客户端仍能干净销毁——错误路径的资源闭环
         client.destroy();
@@ -279,9 +286,10 @@ mod tests {
         // 端口 9（discard 服务）在本机开发环境几乎必然无人监听：
         // 连接失败 → 状态机持续重连 → 预算内不会有 Connected 事件
         let client = TypedSdkClient::new("127.0.0.1:9", 1, "demo", None).unwrap();
-        let (client, code) = client
-            .wait_connected(Duration::from_millis(300))
-            .expect_err("无人监听的地址必然等不到握手");
+        let (client, code) = match client.wait_connected(Duration::from_millis(300)) {
+            Ok(_) => panic!("无人监听的地址必然等不到握手"),
+            Err(returned) => returned,
+        };
         assert_eq!(code, error::ERR_TIMEOUT);
         client.destroy();
     }
