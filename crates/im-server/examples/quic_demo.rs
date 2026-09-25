@@ -27,7 +27,9 @@ use im_crypto::TlsMaterial;
 use im_protocol::{Handshake, HandshakeAck, Msg, MsgAck, Payload};
 use im_server::session::{SessionConfig, Sessions, serve_connection};
 use im_transport::shutdown::shutdown_channel;
-use im_transport::{Connection, GatewayConfig, QuicAcceptor, QuicConnection, QuicConnector, QuicStream};
+use im_transport::{
+    Connection, GatewayConfig, QuicAcceptor, QuicConnection, QuicConnector, QuicStream,
+};
 
 /// 演示端口固定（紧挨 tls_demo 的 18889，方便对比抓包：
 /// 一个抓 TCP，一个抓 UDP）。

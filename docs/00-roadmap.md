@@ -68,7 +68,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 10 | 压测与三级性能里程碑（M1 达成 99,969 连接；顺带修复接收窗楔死缺陷） | `im-bench` | 16 | ✅ 已完成 |
 | 11 | FFI SDK：C ABI / JNI / 内存契约 | `im-sdk` | 17 | ✅ 已完成 |
 | 12 | TLS 传输加密（rustls）+ E2EE（Signal 双棘轮）+ 类型状态原生 API（Tauri 壳诚实边界，见 docs/18 §五） | `im-crypto` + `im-transport` + `im-sdk::native` | 18 | ✅ 已完成 |
-| 13 | QUIC（quinn）+ 挂载盘（FUSE/WinFsp） | 扩展 | 19 | 未开始 |
+| 13 | QUIC（quinn：多路复用/无队头阻塞，`GatewayStream` 利息兑现）+ 挂载盘语义层（im-mount：手写 LRU + 内存 FS + 目录缓存 + IM 视图映射，FUSE/WinFsp 驱动接线为诚实边界，见 docs/19 §4.6） | `im-transport::quic` + `im-mount` | 19 | ✅ 已完成 |
 | 14 | 开源工程化：CI 矩阵 / 版本 / 文档站 | `.github` | — | 未开始 |
 
 > 阶段重排说明（阶段 5 收尾时定稿）：原阶段 5~9（压测 / FFI / 桌面+E2EE /
@@ -104,7 +104,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 消息 ACK、有序性、去重窗口 | 文档 05 | 阶段 2 seq/ack 机制 |
 | 弱网优化、100ms RTT + 10% 丢包 | 文档 16 | 阶段 10 用户态弱网模拟器 |
 | WebSocket / WebRTC | 文档 12、14 | 阶段 5 WS 网关（JSON 信封）、阶段 8 P2P 音视频 |
-| QUIC | 文档 19 | 阶段 13 quinn 集成与 TCP 对比 |
+| QUIC | 文档 19 | 阶段 13 quinn 装配（多路复用/无队头阻塞测试钉进 CI；弱网对 TCP 的实测对比记为欠账） |
 | TLS/mTLS 握手 | 文档 18 | 阶段 12 前置实现的 rustls |
 | E2EE / Signal 协议 | 文档 18 | 阶段 12 X3DH + 双棘轮实现 |
 
@@ -126,7 +126,7 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | SDK 从 0 到 1 设计（API/错误模型/版本兼容） | 文档 17 | 阶段 11 |
 | 背压、扇出风暴、内存账本 | 文档 06、13 | 阶段 3 服务端、阶段 7 群扇出 |
 | 压测方法、火焰图、量化优化 | 文档 16 | 阶段 10 |
-| 挂载盘（FUSE / WinFsp / 元数据缓存） | 文档 19 | 阶段 13 |
+| 挂载盘（FUSE / WinFsp / 元数据缓存） | 文档 19 | 阶段 13 `im-mount` 语义层（手写 LRU 目录缓存；本机无 WinFsp 驱动，接线层诚实记录） |
 | Web 全栈（REST/WS 网关/前端状态管理） | 文档 12 | 阶段 5~9（axum + Vue 双端） |
 
 ### 4.5 算法、数据结构与设计模式图谱
@@ -143,13 +143,13 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 定长去重窗口（滑动窗口 + 位图/HashSet） | 消息 seq 去重与乱序重排 | 阶段 2 |
 | 哈希定时轮（Hashed Timing Wheel） | 心跳超时、重连退避、消息重传定时器（Kafka 同款，比每个定时器一个堆便宜得多） | 阶段 2 手写 |
 | 一致性哈希环 + 虚拟节点 | 服务端分布式路由预留 | 阶段 3 手写 |
-| LRU 缓存（HashMap + 双向链表） | 服务端会话/元数据缓存、挂载盘目录缓存 | 阶段 3/13 手写，对比 `lru` crate |
+| LRU 缓存（HashMap + 双向链表） | 挂载盘目录缓存（服务端会话缓存未用到 LRU，诚实记账：全项目唯一手写落地在阶段 13） | 阶段 13 手写（slab 下标版零 unsafe），对比 `lru` crate |
 | 分片并发哈希表（Sharded HashMap） | 会话路由表：理解 `DashMap` 内部的锁分片思想 | 阶段 3 手写简化版 |
 | 雪花 ID（位段分配 + 时钟回拨处理） | 全局消息 ID 生成 | 阶段 3 |
 | 群成员快照 + 每群写 actor | 群消息扇出：成员列表缓存，DB 变更时失效 | 阶段 7 |
 | 小顶堆 / 分位数草图 | P99 延迟统计（压测的核心数据结构） | 阶段 10 |
 | B+ 树 / LSM 思想 | 本地消息库索引、写前日志（理解 SQLite/RocksDB 原理） | 阶段 4（自研简化 LSM） |
-| 布隆过滤器 | 在线状态/已读去重的概率性预判 | 阶段 13 扩展 |
+| 布隆过滤器 | 在线状态/已读去重的概率性预判 | 未排期（阶段 13 收尾时未纳入，诚实记录） |
 
 #### 算法
 
@@ -173,13 +173,13 @@ im-protocol ← im-transport ← im-server / im-client / im-sdk
 | 策略（Strategy） | 重连退避策略、压缩算法选择、弱网模拟策略 | 2/10 |
 | 编解码器（Encoder/Decoder，GoF 外的新范式） | 帧编解码，`Framed` 组合 `TcpStream` | 1/2 |
 | 装饰器（Decorator） | `TcpStream` → TLS 流 → 帧流的层层包装（零成本抽象的典型） | 2 |
-| 适配器（Adapter） | WS 网关：JSON 信封 ↔ 二进制帧翻译层（`web/ws.rs`）——同一会话核心适配两种传输 | 5 |
+| 适配器（Adapter） | WS 网关：JSON 信封 ↔ 二进制帧翻译层（`web/ws.rs`）——同一会话核心适配两种传输；`QuicStream`：quinn 收发半部 → AsyncRead+AsyncWrite 整流（docs/19 §五） | 5/13 |
 | 仓库模式（Repository） | web 模块仓储层（account/friends/groups/files），SQL 细节不出仓储（Java 对照 Spring Data） | 5 |
 | 观察者/发布订阅（Observer/Pub-Sub） | 消息路由扇出、SDK 事件回调 | 3/11 |
 | Actor 模型 | 每连接一个 task + channel 通信，无共享内存 | 3 |
 | 责任链（Chain of Responsibility） | 服务端包处理流水线：解码→鉴权→限流→路由 | 3 |
 | 生成器（Builder） | 复杂帧/配置对象的构建 | 1/2 |
-| 句柄/门面（Handle/Facade） | FFI SDK 的唯一对外形态：不透明指针 + 极简 C API | 11 |
+| 句柄/门面（Handle/Facade） | FFI SDK 的唯一对外形态：不透明指针 + 极简 C API；QUIC 装配层 `QuicAcceptor`/`QuicConnector`（quinn 类型不越界） | 11/13 |
 | 回调注册（回调即观察者的 C 形态） | SDK 跨语言事件推送 | 11 |
 | 错误码模型（Result 惯用法替代异常） | SDK 错误契约、`thiserror`/`anyhow` 分层 | 全程 |
 | NEWTYPE（Rust 特有） | `UserId(u64)`、`Seq(u64)`——零成本类型安全 | 全程 |

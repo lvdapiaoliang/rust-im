@@ -28,6 +28,8 @@
 //! 「同步回」IM 需要双向冲突合并——那是产品级的坑（见 docs/19
 //! 的取舍记录），学习项目止步于单向投影。
 
+use std::collections::BTreeMap;
+
 use crate::error::FsError;
 use crate::memfs::MemFs;
 
@@ -105,7 +107,6 @@ pub fn build_im_view(contacts: &[Contact], messages: &[ChatMessage]) -> Result<M
     // 逐条 write_file 会反复覆写同一天文件——先在内存里按 (peer, date)
     // 聚合成整段日志再一次写入（教科书式的「先聚合再落盘」，
     // 也让本函数天然幂等）
-    use std::collections::BTreeMap;
     let mut by_day: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
     for message in messages {
         by_day

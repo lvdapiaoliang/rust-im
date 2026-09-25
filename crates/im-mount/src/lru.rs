@@ -157,25 +157,18 @@ where
         // 「插入即淘汰」自然发生；容量 n 时先到 n+1 再踢回 n，
         // 两种情况同一条代码路径——先淘汰后插入在容量 0 时会落空，
         // 这个边界用例当初就是这么写出来的）
-        let idx = match self.free.pop() {
-            Some(idx) => {
-                *self.slot_at(idx) = Some(Slot { key: key.clone(), value, prev: None, next: None });
-                idx
-            }
-            None => {
-                self.slots.push(Some(Slot { key: key.clone(), value, prev: None, next: None }));
-                self.slots.len() - 1
-            }
+        let slot = Slot { key: key.clone(), value, prev: None, next: None };
+        let idx = if let Some(idx) = self.free.pop() {
+            *self.slot_at(idx) = Some(slot);
+            idx
+        } else {
+            self.slots.push(Some(slot));
+            self.slots.len() - 1
         };
         self.push_front(idx);
         self.map.insert(key, idx);
         // 超容 → 淘汰表尾（最久未用）
-        let evicted = if self.map.len() > self.capacity {
-            self.evict_tail()
-        } else {
-            None
-        };
-        evicted
+        if self.map.len() > self.capacity { self.evict_tail() } else { None }
     }
 
     /// 主动删除某条（与淘汰同一条清理路径）。
@@ -412,7 +405,7 @@ mod tests {
         assert_eq!(cache.get(&k("d")), Some(&4));
     }
 
-    /// get_mut 也算「使用」，同样刷新时序。
+    /// `get_mut` 也算「使用」，同样刷新时序。
     #[test]
     fn get_mut_refreshes_recency() {
         let mut cache = LruCache::new(2);

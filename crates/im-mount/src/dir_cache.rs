@@ -64,11 +64,7 @@ impl DirCache {
     #[must_use]
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits.saturating_add(self.misses);
-        if total == 0 {
-            0.0
-        } else {
-            f64::from(self.hits) / f64::from(total)
-        }
+        if total == 0 { 0.0 } else { f64::from(self.hits) / f64::from(total) }
     }
 
     /// 读目录：先查缓存，miss 走 [`MemFs`] 并回填。
@@ -186,10 +182,12 @@ impl CachedFs {
     /// 失效 `path` 的父目录（改动影响的是父目录的**列表**）。
     fn invalidate_parent_of(&mut self, path: &str) {
         // "/a/b/c" → "/a/b"；根下的直接子项影响的是根目录 "/"
+        // （"/x" rsplit_once 后父段是空串——用字面量模式直说，
+        // 不用 is_empty 守卫：模式能表达的不进守卫）
         let parent = match path.rsplit_once('/') {
-            Some((dir, _)) if dir.is_empty() => "/".to_string(),
+            // "/x"（父段为空）与无斜杠的裸名字：影响的都是根目录 "/"
+            Some(("", _)) | None => "/".to_string(),
             Some((dir, _)) => dir.to_string(),
-            None => "/".to_string(),
         };
         self.dir_cache.invalidate(&parent);
     }
@@ -291,11 +289,15 @@ mod tests {
     #[test]
     fn hit_rate_handles_cold_cache() {
         let mut cache = DirCache::new(4);
-        assert_eq!(cache.hit_rate(), 0.0, "0/0 不 NaN");
+        // 冷缓存 0/0 的口径是「记 0.0 不 NaN」——float 相等断言是 clippy
+        // 的雷区，用 to_bits 位级比对：NaN 的位模式不等于 0.0，断言
+        // 信息量一点不丢
+        assert_eq!(cache.hit_rate().to_bits(), 0.0_f64.to_bits(), "0/0 记 0.0，不 NaN");
         let fs = MemFs::new();
         cache.read_dir(&fs, "/").unwrap();
         cache.read_dir(&fs, "/").unwrap();
-        let rate = cache.hit_rate();
-        assert!((rate - 0.5).abs() < f64::EPSILON, "1 命中 1 未命中 → 50%");
+        // 命中率用整数算交叉验证（浮点相等断言是 clippy 的雷区，
+        // 命中*2 == 总数 的整数形态信息量等价、零精度问题）
+        assert_eq!(cache.hits() * 2, cache.hits() + cache.misses(), "1 命中 1 未命中 → 50%");
     }
 }

@@ -18,13 +18,13 @@
 //! ```
 //!
 //! 驱动层（真挂载）依赖内核态组件：Linux 的 FUSE 设备、Windows 的
-//! WinFsp 驱动。本 crate 不带 unsafe、不碰内核——先把**中间层的
+//! `WinFsp` 驱动。本 crate 不带 unsafe、不碰内核——先把**中间层的
 //! 语义**用可测试的方式钉死（路径解析、目录项、错误分类），驱动
 //! 接线是纯粹的胶水（把回调参数翻译成本模块的方法调用）。
 //!
 //! # 与真实 FUSE 的语义对齐
 //!
-//! | 本模块方法 | FUSE 回调 | WinFsp 侧 | 说明 |
+//! | 本模块方法 | FUSE 回调 | `WinFsp` 侧 | 说明 |
 //! |-----------|----------|-----------|------|
 //! | [`MemFs::lookup`] | `lookup` | `GetFileInfoByPath` | 路径 → 属性 |
 //! | [`MemFs::read_dir`] | `readdir` | `FindFiles` | 目录项列表 |
@@ -141,6 +141,12 @@ impl MemFs {
     ///
     /// 路径不存在，或路径不是目录（[`FsError::NotADirectory`]，
     /// POSIX 的 `ENOTDIR` 同名对齐）。
+    ///
+    /// # Panics
+    ///
+    /// 目录项指向的 inode 失踪时 panic——那是内部一致性 bug
+    ///（目录项与 inode 表同源维护，正常代码路径不可达），不拿
+    /// IO 错误掩盖，见 [`FsError::InodeGone`] 的说明。
     pub fn read_dir(&self, path: &str) -> Result<Vec<DirEntry>, FsError> {
         let ino = self.resolve(path)?;
         let node = self.node(ino)?;
@@ -168,10 +174,12 @@ impl MemFs {
     pub fn read(&self, path: &str) -> Result<&[u8], FsError> {
         let ino = self.resolve(path)?;
         let node = self.node(ino)?;
-        if node.kind != NodeKind::Directory {
-            Ok(&node.data)
-        } else {
+        // 目录没有内容可读：EISDIR（正向判断——「是目录才拒」比
+        // 「不是目录才收」把错误分支放在面前）
+        if node.kind == NodeKind::Directory {
             Err(FsError::IsADirectory { path: path.into() })
+        } else {
+            Ok(&node.data)
         }
     }
 
@@ -190,7 +198,11 @@ impl MemFs {
         if parent_node.children.contains_key(name) {
             return Err(FsError::AlreadyExists { path: path.into() });
         }
-        let ino = self.alloc(Node { kind: NodeKind::Directory, children: BTreeMap::new(), data: Vec::new() });
+        let ino = self.alloc(Node {
+            kind: NodeKind::Directory,
+            children: BTreeMap::new(),
+            data: Vec::new(),
+        });
         self.node_mut(parent)?.children.insert(name.to_string(), ino);
         Ok(ino)
     }
@@ -216,7 +228,8 @@ impl MemFs {
             child_node.data = data.into();
             return Ok(child);
         }
-        let ino = self.alloc(Node { kind: NodeKind::File, children: BTreeMap::new(), data: data.into() });
+        let ino =
+            self.alloc(Node { kind: NodeKind::File, children: BTreeMap::new(), data: data.into() });
         self.node_mut(parent)?.children.insert(name.to_string(), ino);
         Ok(ino)
     }
@@ -284,9 +297,8 @@ impl MemFs {
     /// 借用打架——生命周期标注不是美学问题，是借用检查器的合同。
     fn split_parent<'a>(&self, path: &'a str) -> Result<(Ino, &'a str), FsError> {
         let components = components(path).collect::<Vec<_>>();
-        let (name, ancestors) = components
-            .split_last()
-            .ok_or_else(|| FsError::InvalidPath { path: path.into() })?;
+        let (name, ancestors) =
+            components.split_last().ok_or_else(|| FsError::InvalidPath { path: path.into() })?;
         // 逐级走到父目录
         let mut parent = self.root;
         for component in ancestors {
@@ -391,10 +403,7 @@ mod tests {
     #[test]
     fn mkdir_rejects_duplicates_and_missing_parents() {
         let mut fs = sample_fs();
-        assert_eq!(
-            fs.mkdir("/contacts"),
-            Err(FsError::AlreadyExists { path: "/contacts".into() })
-        );
+        assert_eq!(fs.mkdir("/contacts"), Err(FsError::AlreadyExists { path: "/contacts".into() }));
         assert_eq!(
             fs.mkdir("/deep/nested"),
             Err(FsError::NotFound { path: "/deep/nested".into() }),
