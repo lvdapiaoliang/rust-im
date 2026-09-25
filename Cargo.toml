@@ -8,6 +8,7 @@ members = [
     "crates/im-server",
     "crates/im-client",
     "crates/im-sdk",
+    "crates/im-mount",
     "crates/im-bench",
     "crates/xtask",
 ]
@@ -30,6 +31,7 @@ im-storage = { path = "crates/im-storage" }
 im-server = { path = "crates/im-server" }
 im-client = { path = "crates/im-client" }
 im-sdk = { path = "crates/im-sdk" }
+im-mount = { path = "crates/im-mount" }
 
 # ---- 异步运行时（本项目的性能核心）----
 tokio = { version = "1", features = ["full"] }

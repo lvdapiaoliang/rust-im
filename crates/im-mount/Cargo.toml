@@ -1,0 +1,17 @@
+[package]
+name = "im-mount"
+description = "挂载盘语义层：手写 LRU 元数据缓存、内存文件系统（FUSE/WinFsp 回调的纯逻辑部分）、IM 数据到 FS 视图的协议映射"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# im-mount 刻意零运行时依赖（纯 std）：挂载盘的语义层是确定性纯逻辑，
+# 不掺异步、不掺网络——内核回调进来是什么就答什么，可测试性最大化。
+# thiserror 只用于错误类型的声明式定义（与全 workspace 一致的纪律）。
+thiserror.workspace = true
