@@ -12,7 +12,7 @@ workspace 管理（根 `Cargo.toml` 的 `[workspace.package]`，一处 bump 全 
 
 ## [0.1.0] —— 阶段 0~14（待打 tag 发布）
 
-首个版本：从 workspace 骨架到 QUIC 传输与挂载盘语义层的完整 IM 全栈。
+首个版本：从 workspace 骨架到 QUIC 传输、挂载盘语义层与开源工程化（CI/文档站）的完整 IM 全栈。
 每个阶段的详细设计见对应文档。
 
 ### 阶段 0~1：骨架与协议（docs/04）
